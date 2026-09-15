@@ -13,7 +13,7 @@
  */
 import * as THREE from 'three';
 import type { AudioFrame } from '../audio/types';
-import { getAudioFrame, setAudioSensitivity } from '../audio/useAudioAnalyzer';
+import { getAudioFrame, setAudioGenre, setAudioSensitivity } from '../audio/useAudioAnalyzer';
 import { getPalette, hslToRgb, type Palette } from '../state/palettes';
 import type { StageSettings } from '../state/presets';
 import { settingsStore } from '../state/settingsStore';
@@ -97,6 +97,7 @@ export function updateStage() {
   const elapsed = (t - startMs) / 1000;
   const settings = settingsStore.getSettings();
   setAudioSensitivity(settings.sensitivity);
+  setAudioGenre(settings.genre);
   const audio = getAudioFrame();
   // Resolve the palette: 'auto' follows the director's rotating pick; the hue,
   // spread and saturation glide toward the target so palette changes crossfade.
@@ -128,7 +129,11 @@ export function updateStage() {
   stage.beatEnv = clamp01(audio.beatEnvelope * react);
   stage.intensity = settings.intensity * (0.55 + stage.amp * 0.75);
 
-  updateDirector({ amp: stage.amp, bass: stage.bass, beat: audio.beat, bpm: audio.bpm }, settings, dt);
+  updateDirector(
+    { amp: stage.amp, bass: stage.bass, beat: audio.beat, bpm: audio.bpm, bpmConfidence: audio.bpmConfidence },
+    settings,
+    dt,
+  );
 
   // Colour engine: a phase advances with tempo and jumps on each beat; the hue
   // swings around the palette's base hue within its spread so the chosen

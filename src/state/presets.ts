@@ -31,6 +31,15 @@ export const CUES: { id: CueId; label: string }[] = [
   { id: 'full', label: 'Everything' },
 ];
 
+/** Music profiles. 'auto' is genre-neutral. */
+export type GenreId = 'auto' | 'trance' | 'techno' | 'house';
+export const GENRES: { id: GenreId; label: string; blurb: string }[] = [
+  { id: 'auto', label: 'Auto', blurb: 'Genre neutral' },
+  { id: 'trance', label: 'Trance', blurb: '128-145 BPM, long breakdowns, big drops, laser heavy' },
+  { id: 'techno', label: 'Techno', blurb: '125-140 BPM, 16-beat phrases, strobes, minimal wall' },
+  { id: 'house', label: 'House', blurb: '118-130 BPM, warm beams, softer drops' },
+];
+
 /**
  * arena    = lasers only at the stage front, exclusive looks (Transmission style)
  * festival = lasers on the truss and the floor, beams and lasers together (the original rig)
@@ -55,8 +64,9 @@ export const WALL_SHAPES = [
   { id: 8, name: 'Clouds' },
   { id: 9, name: 'Streaks' },
   { id: 10, name: 'Robot' },
+  { id: 11, name: 'Smoke' },
 ] as const;
-export const WALL_SHAPE_COUNT = 11;
+export const WALL_SHAPE_COUNT = 12;
 
 export interface StageSettings {
   paletteId: string;
@@ -94,6 +104,8 @@ export interface StageSettings {
   blackout: boolean;
   /** vertical resolution the stage renders at while recording */
   recordQuality: 'screen' | '1080' | '1440' | '2160';
+  /** music profile: tunes BPM range, phrase length, breakdown/drop and build detection */
+  genre: GenreId;
   /** LED wall content */
   wallMode: WallMode;
   wallShape: number;
@@ -124,6 +136,7 @@ export const DEFAULT_SETTINGS: StageSettings = {
   laserGroup: 'auto',
   blackout: false,
   recordQuality: '1080',
+  genre: 'auto',
   wallMode: 'auto',
   wallShape: 0,
   wallText: '',

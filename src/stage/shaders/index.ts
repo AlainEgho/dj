@@ -292,6 +292,20 @@ export const ledFragment = /* glsl */ `
       float spokes = smoothstep(0.6, 1.0, sin(atan(p.y, p.x) * 12.0 + t * 0.4)) * step(ir, 0.19) * step(0.08, ir) * 0.5;
       float pupil = smoothstep(0.012, 0.0, ir - (0.075 - uBass * 0.03));
       v = max(max(outline, (iris + spokes + pupil) * almond), 0.0);
+    } else if (shape > 10.5) {
+      // Smoke: thick fog rolling upward, curling on itself. Domain warping with
+      // an upward drift gives billows rather than flat noise, and the bass
+      // pushes fresh plumes up from the floor of the wall.
+      vec2 q = p * vec2(1.3, 1.1);
+      float rise = t * 0.10;
+      vec2 warp = vec2(fbm(q * 1.4 + vec2(0.0, -rise * 1.3)), fbm(q * 1.4 + vec2(5.2, 1.3 - rise)));
+      float dens = fbm(q * 1.7 + warp * 1.6 + vec2(0.0, -rise));
+      // plumes are thicker low on the wall and thin out towards the top
+      float column = 1.0 - smoothstep(-0.45, 0.45, p.y);
+      float puff = smoothstep(0.42, 0.78, dens) * (0.35 + column * 0.85);
+      // bass shoves a brighter front up through the smoke
+      float front = smoothstep(0.12, 0.0, abs(p.y + 0.45 - uBass * 0.9)) * uBass * 0.7;
+      v = clamp(puff + front * puff * 2.0, 0.0, 1.0);
     } else if (shape > 9.5) {
       // Robot: giant humanoid outline that breathes and sways, with eyes and a
       // chest core pulsing on the bass and a scanline sweeping down the body.

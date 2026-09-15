@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PALETTES, hslToHex } from '../state/palettes';
-import { CUES, RIG_STYLES, WALL_SHAPES, type ShowMode, type StageSettings, type WallMode } from '../state/presets';
+import { CUES, GENRES, RIG_STYLES, WALL_SHAPES, type ShowMode, type StageSettings, type WallMode } from '../state/presets';
 import { settingsStore, usePresets, useSettings } from '../state/settingsStore';
 import { Btn } from './ControlBar';
 import { Slider } from './Slider';
@@ -78,6 +78,25 @@ export function SettingsPanel() {
           <Slider label="Base hue" value={s.customHue} min={0} max={360} step={1} onChange={(v) => set({ customHue: v })} format={(v) => `${Math.round(v)}°`} />
         ) : null}
         <Slider label="Hue cycling (per beat)" value={s.hueCycleSpeed} onChange={(v) => set({ hueCycleSpeed: v })} />
+      </Section>
+
+      <Section title="Music profile">
+        <View style={styles.chips}>
+          {GENRES.map((g) => (
+            <Pressable
+              key={g.id}
+              onPress={() => set({ genre: g.id })}
+              style={[styles.modeChip, s.genre === g.id && styles.chipActive]}
+            >
+              <Text style={styles.chipTitle}>{g.label}</Text>
+              <Text style={styles.chipBlurb}>{g.blurb}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.note}>
+          Tunes the tempo range, phrase length, and how breakdowns, build-ups and drops are recognised. Trance holds 32-beat
+          phrases, rests the lasers through a breakdown and waits for a real drop.
+        </Text>
       </Section>
 
       <Section title="Show pacing">

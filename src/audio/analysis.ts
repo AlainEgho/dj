@@ -109,6 +109,14 @@ export class FeatureExtractor {
   }
 
   private gainFloor = 0.05;
+  private bpmMin = 70;
+  private bpmMax = 170;
+
+  /** Fold tempo estimates into this range (genre profiles narrow it, e.g. trance 125-150). */
+  setBpmRange(min: number, max: number) {
+    this.bpmMin = min;
+    this.bpmMax = max;
+  }
 
   process(freq: Uint8Array, timeDomain: Float32Array, now: number): AudioFrame {
     // ---- frame timing ------------------------------------------------
@@ -285,9 +293,9 @@ export class FeatureExtractor {
     const offset = denom !== 0 ? (0.5 * (y0 - y2)) / denom : 0;
     const lagMs = (bestLag + offset) * msPerFrame;
     let bpm = 60000 / lagMs;
-    // fold into the 70-170 range that covers most dance music
-    while (bpm < 70) bpm *= 2;
-    while (bpm > 170) bpm /= 2;
+    // fold into the configured range (70-170 by default; genre profiles narrow it)
+    while (bpm < this.bpmMin) bpm *= 2;
+    while (bpm > this.bpmMax) bpm /= 2;
 
     const confidence = clamp01(bestVal / (energy / n));
     if (this.bpm === 0 || Math.abs(bpm - this.bpm) > 12) this.bpm = bpm;

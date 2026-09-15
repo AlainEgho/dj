@@ -3,7 +3,7 @@
  * Every binding runs against the settings store or the show director and
  * returns a short label for the on-screen toast.
  */
-import { CUES, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } from '../state/presets';
+import { CUES, GENRES, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } from '../state/presets';
 import { PALETTES } from '../state/palettes';
 import { settingsStore } from '../state/settingsStore';
 import { triggerDrop } from '../stage/director';
@@ -29,7 +29,7 @@ const toggle = (k: keyof StageSettings, name: string) => () => {
   set({ [k]: v } as Partial<StageSettings>);
   return `${name} ${v ? 'ON' : 'OFF'}`;
 };
-const nudge = (k: 'intensity' | 'pacing' | 'reactivity' | 'sensitivity', delta: number, name: string) => () => {
+const nudge = (k: 'intensity' | 'pacing' | 'reactivity' | 'sensitivity' | 'hueCycleSpeed', delta: number, name: string) => () => {
   const v = Math.round(Math.min(1, Math.max(0, (get()[k] as number) + delta)) * 100) / 100;
   set({ [k]: v } as Partial<StageSettings>);
   return `${name} ${Math.round(v * 100)}%`;
@@ -56,6 +56,22 @@ const cueBindings: KeyBinding[] = CUES.map((c, i) => ({
 const LASER_COLORS = ['mixed', 'green', 'palette'] as const;
 const SHOW_MODES = ['chill', 'festival', 'rave'] as const;
 
+/**
+ * Shift + a number jumps straight to a palette. The plain number keys are cues,
+ * so the shifted symbols (!, @, #, ...) are what the browser actually reports.
+ */
+const SHIFT_DIGITS = ['!', '@', '#', '$', '%', '^', '&', '*'];
+const PALETTE_KEYS: KeyBinding[] = PALETTES.slice(0, SHIFT_DIGITS.length).map((p, i) => ({
+  key: SHIFT_DIGITS[i],
+  shift: true,
+  label: `Palette: ${p.name}`,
+  group: 'Colour',
+  run: () => {
+    set({ paletteId: p.id });
+    return `Palette: ${p.name}`;
+  },
+}));
+
 export const KEYMAP: KeyBinding[] = [
   ...cueBindings,
 
@@ -71,6 +87,12 @@ export const KEYMAP: KeyBinding[] = [
     label: 'Cycle rig style',
     group: 'Elements',
     run: cycle('rigStyle', RIG_STYLES.map((r) => r.id), 'Rig'),
+  },
+  {
+    key: 'm',
+    label: 'Cycle music profile (trance / techno / house)',
+    group: 'Elements',
+    run: cycle('genre', GENRES.map((g) => g.id), 'Music'),
   },
   { key: 'j', label: 'Cycle show mode', group: 'Elements', run: () => {
     const cur = get().showMode;
@@ -118,6 +140,30 @@ export const KEYMAP: KeyBinding[] = [
   { key: '.', label: 'Next palette', group: 'Colour', run: cycle('paletteId', PALETTES_ORDER, 'Palette', 1) },
   { key: 'a', label: 'Auto palette', group: 'Colour', run: () => (set({ paletteId: 'auto' }), 'Palette: auto') },
   { key: 'y', label: 'Cycle laser colour', group: 'Colour', run: cycle('laserColor', LASER_COLORS, 'Laser colour') },
+  // Shift + a number jumps straight to a palette
+  ...PALETTE_KEYS,
+  {
+    key: ';',
+    label: 'Custom hue -15°',
+    group: 'Colour',
+    run: () => {
+      const h = (get().customHue - 15 + 360) % 360;
+      set({ customHue: h, paletteId: 'custom' });
+      return `Hue ${Math.round(h)}°`;
+    },
+  },
+  {
+    key: "'",
+    label: 'Custom hue +15°',
+    group: 'Colour',
+    run: () => {
+      const h = (get().customHue + 15) % 360;
+      set({ customHue: h, paletteId: 'custom' });
+      return `Hue ${Math.round(h)}°`;
+    },
+  },
+  { key: '/', label: 'Hue cycling slower', group: 'Colour', run: nudge('hueCycleSpeed', -0.15, 'Hue cycling') },
+  { key: '\\', label: 'Hue cycling faster', group: 'Colour', run: nudge('hueCycleSpeed', 0.15, 'Hue cycling') },
 
   { key: 'ArrowUp', label: 'Intensity +', group: 'Levels', run: nudge('intensity', 0.1, 'Intensity') },
   { key: 'ArrowDown', label: 'Intensity -', group: 'Levels', run: nudge('intensity', -0.1, 'Intensity') },
@@ -159,10 +205,13 @@ export function describeKey(b: KeyBinding): string {
 }
 
 export function findBinding(e: { key: string; shiftKey: boolean }): KeyBinding | undefined {
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  // prefer an exact shift match, fall back to a binding without shift
+  // Shifted symbols (!, @, #...) arrive as themselves, so try the raw key first,
+  // then the lowercased form for plain letters.
+  const raw = e.key;
+  const lower = raw.length === 1 ? raw.toLowerCase() : raw;
   return (
-    KEYMAP.find((b) => b.key === key && !!b.shift === e.shiftKey) ??
-    KEYMAP.find((b) => b.key === (e.key.length === 1 ? e.key : key) && !b.shift && !e.shiftKey)
+    KEYMAP.find((b) => b.key === raw && !!b.shift === e.shiftKey) ??
+    KEYMAP.find((b) => b.key === lower && !!b.shift === e.shiftKey) ??
+    KEYMAP.find((b) => b.key === lower && !b.shift && !e.shiftKey)
   );
 }

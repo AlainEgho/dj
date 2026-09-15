@@ -118,6 +118,20 @@ class AudioAnalyzer {
     this.sensitivity = v;
     this.extractor.setSensitivity(v);
   };
+
+  private genre = '';
+  /** Genre profile: narrows the BPM fold range so half/double-time errors vanish. */
+  setGenre = (genre: string) => {
+    if (genre === this.genre) return;
+    this.genre = genre;
+    const range: Record<string, [number, number]> = {
+      trance: [125, 150],
+      techno: [122, 145],
+      house: [115, 132],
+    };
+    const [lo, hi] = range[genre] ?? [70, 170];
+    this.extractor.setBpmRange(lo, hi);
+  };
   startMic = () => this.guard(() => this.engine.startMic());
   startSystemAudio = () => this.guard(() => this.engine.startSystemAudio());
   loadFile = () =>
@@ -182,6 +196,9 @@ export const getAudioFrame = (): AudioFrame => getAnalyzer().getFrame();
 
 /** 0..1 input sensitivity (beat threshold + gain floor). Cheap to call every frame. */
 export const setAudioSensitivity = (v: number) => getAnalyzer().setSensitivity(v);
+
+/** Genre profile for tempo folding. Cheap to call every frame. */
+export const setAudioGenre = (genre: string) => getAnalyzer().setGenre(genre);
 
 /** MediaStream of the audio driving the show, for screen recording (web). */
 export const getRecordingAudioStream = (): MediaStream | null => getAnalyzer().getRecordingStream();
