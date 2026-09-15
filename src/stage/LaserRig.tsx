@@ -118,20 +118,30 @@ export function LaserRig() {
   );
 
   const fanRefs = useRef<(THREE.Group | null)[]>([]);
+  const smooth = useRef({ mid: 0, amp: 0, build: 0 });
 
   useFrame(() => {
     const s = stage;
+    // Lasers follow slow followers of the audio (about a second), not the raw
+    // per-frame values, so they move with the music instead of twitching.
+    const sm = smooth.current;
+    const k = Math.min(1, s.dt / 1.0);
+    sm.mid += (s.mid - sm.mid) * k;
+    sm.amp += (s.amp - sm.amp) * k;
+    sm.build += (director.build - sm.build) * Math.min(1, s.dt / 1.5);
+    const build = sm.build;
+
     // Build-ups bring the lasers up gradually even in beam looks; the pre-drop
     // blackout kills everything for a beat.
-    const build = director.build;
     const weight = s.settings.lasersEnabled ? Math.min(1, director.lasers + build * 0.6) * (1 - director.blackout) : 0;
     const wMesh = director.mesh;
     const wSheet = director.sheet * (1 - wMesh);
     const wAim = director.laserAim * (1 - wMesh - wSheet);
     const wSweep = Math.max(0, 1 - wMesh - wSheet - wAim);
     // when every fixture fires, slow the sweep a little so the picture stays readable
-    const sweepSpeed = s.pace * (0.15 + s.mid * 0.3) * (1 + build * 0.8) * (1 - director.gAll * 0.35);
-    const sweepLines = 6 + s.settings.laserDensity * 4 + build * 6;
+    const sweepSpeed = s.pace * (0.15 + sm.mid * 0.25) * (1 + build * 0.6) * (1 - director.gAll * 0.35);
+    // whole-number line counts: a fractional count would shift every line each frame
+    const sweepLines = Math.round(6 + s.settings.laserDensity * 4 + build * 5);
 
     for (let i = 0; i < fixtures.length; i++) {
       const g = fanRefs.current[i];
@@ -183,11 +193,11 @@ export function LaserRig() {
 
       const u = m.uniforms;
       u.uTime.value = s.time;
-      u.uTreble.value = s.treble * 0.6;
-      u.uBeat.value = s.beatEnv * (1 - wMesh * 0.7);
+      u.uTreble.value = s.treble * 0.3;
+      u.uBeat.value = s.beatEnv * 0.4 * (1 - wMesh * 0.7);
       u.uIntensity.value =
-        fixtureWeight * s.settings.intensity * (0.55 + s.amp * 0.45) * (1 + wMesh * 0.3 + wAim * 0.2 - wSheet * 0.5 + director.white * 0.4);
-      u.uLines.value = sweepLines * wSweep + 16 * wMesh + 9 * wAim + 40 * wSheet;
+        fixtureWeight * s.settings.intensity * (0.6 + sm.amp * 0.4) * (1 + wMesh * 0.3 + wAim * 0.2 - wSheet * 0.5 + director.white * 0.4);
+      u.uLines.value = Math.round(sweepLines * wSweep + 16 * wMesh + 9 * wAim + 40 * wSheet);
       u.uSpread.value = 1.0 * wSweep + 0.9 * wMesh + 0.7 * wAim + 2.4 * wSheet;
       // sheets use very wide beams so the lines fuse into one solid plane
       u.uWidth.value = 0.045 + wSheet * 1.5 + director.white * 0.02;
