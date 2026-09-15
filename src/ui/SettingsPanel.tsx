@@ -16,6 +16,7 @@ const MODES: { id: ShowMode; label: string; blurb: string }[] = [
 const WALL_MODES: { id: WallMode; label: string }[] = [
   { id: 'auto', label: 'Auto' },
   { id: 'spectrum', label: 'Spectrum' },
+  { id: 'heatmap', label: 'Heat map' },
   { id: 'shapes', label: 'Shapes' },
   { id: 'text', label: 'Text' },
   { id: 'off', label: 'Off' },

@@ -118,6 +118,8 @@ export const ledFragment = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D uSpectrum;
+  uniform sampler2D uHistory;   // bins x time ring buffer of past spectra
+  uniform float uHistRow;       // 0..1 row of the newest spectrum in uHistory
   uniform sampler2D uText;
   uniform float uTextPx;      // text texture width in font pixels
   uniform float uTextLen;     // glyph count
@@ -220,13 +222,24 @@ export const ledFragment = /* glsl */ `
       float k = fract(r * 3.5 - t * 0.12);
       v = smoothstep(0.08 + uBass * 0.06, 0.0, abs(k - 0.5) - 0.02) * (1.0 - smoothstep(0.6, 1.1, r));
     } else if (shape < 2.5) {
-      // Bars: six wide horizontal bars whose width breathes with the spectrum
-      float row = floor((p.y + 0.5) * 6.0);
-      float fy = fract((p.y + 0.5) * 6.0);
-      float spec = texture2D(uSpectrum, vec2(row / 6.0 * 0.6 + 0.05, 0.5)).r;
-      float w = 0.18 + spec * 0.55;
-      float slide = sin(t * 0.3 + row * 1.7) * 0.15;
-      v = smoothstep(w, w - 0.03, abs(p.x - slide)) * smoothstep(0.5, 0.42, abs(fy - 0.5));
+      // Pixel rain: single LEDs fall down each column at their own speed with a
+      // fading trail; columns light up more where the spectrum has energy.
+      vec2 cell = floor(cc * uGrid);
+      float seed = hash2(vec2(cell.x, 3.7));
+      float speed = (5.0 + seed * 9.0) * (0.6 + uPace * 0.8);
+      float span = uGrid.y + 10.0;
+      float head = uGrid.y + 4.0 - mod(seed * 97.0 + uTime * speed, span);
+      float trail = 5.0 + uAmp * 5.0;
+      float dy = cell.y - head;                    // 0 at the head, positive up the trail
+      float drop = step(0.0, dy) * step(dy, trail) * (1.0 - dy / trail);
+      // second, slower drop per column so the wall never looks empty
+      float head2 = uGrid.y + 4.0 - mod(seed * 41.0 + 17.0 + uTime * speed * 0.55, span);
+      float dy2 = cell.y - head2;
+      float drop2 = step(0.0, dy2) * step(dy2, trail * 0.6) * (1.0 - dy2 / (trail * 0.6)) * 0.7;
+      float sx = abs(cc.x - 0.5) * 2.0;
+      float spec = texture2D(uSpectrum, vec2(pow(sx, 1.6), 0.5)).r;
+      float flash = step(0.985, hash2(cell + floor(uTime * 10.0) * 0.71)) * 0.9;
+      v = max(max(drop, drop2) * (0.35 + spec * 0.9), flash);
     } else if (shape < 3.5) {
       // Rays: slowly rotating radial beams plus a small centre disc
       float a = atan(p.y, p.x);
@@ -260,6 +273,21 @@ export const ledFragment = /* glsl */ `
       float spokes = smoothstep(0.6, 1.0, sin(atan(p.y, p.x) * 12.0 + t * 0.4)) * step(ir, 0.19) * step(0.08, ir) * 0.5;
       float pupil = smoothstep(0.012, 0.0, ir - (0.075 - uBass * 0.03));
       v = max(max(outline, (iris + spokes + pupil) * almond), 0.0);
+    } else if (shape > 8.5) {
+      // Streaks: the rain turned sideways, pixels racing across each row,
+      // alternating direction per row, brighter with the level
+      vec2 cell = floor(cc * uGrid);
+      float seed = hash2(vec2(cell.y, 5.1));
+      float dir = step(0.5, hash2(vec2(cell.y, 9.3))) * 2.0 - 1.0;
+      float speed = (10.0 + seed * 16.0) * (0.6 + uPace * 0.8);
+      float span = uGrid.x + 12.0;
+      float head = mod(seed * 131.0 + uTime * speed, span) - 6.0;
+      if (dir < 0.0) head = uGrid.x - head;
+      float dx = (cell.x - head) * -dir;          // 0 at the head, positive along the trail
+      float trail = 7.0 + uAmp * 8.0;
+      float streak = step(0.0, dx) * step(dx, trail) * (1.0 - dx / trail);
+      float flash = step(0.988, hash2(cell + floor(uTime * 10.0) * 0.43)) * 0.9;
+      v = max(streak * (0.5 + uAmp * 0.6), flash);
     } else if (shape > 7.5) {
       // Clouds: soft drifting fog with random pixel twinkles riding on the peaks
       float c = clouds(p, t, uAmp);
@@ -302,10 +330,51 @@ export const ledFragment = /* glsl */ `
     return on * shown * uTextFade * (0.85 + uBeat * 0.15);
   }
 
+  // Spectrogram: newest spectrum at the right edge scrolling left, bass at the
+  // bottom with a log-like frequency axis. Returns energy 0..1 for the ramp.
+  float heatContent(vec2 cc) {
+    float age = 1.0 - cc.x;                       // 0 = now, 1 = oldest
+    float row = fract(uHistRow - age + 1.0 / 128.0);
+    float freq = pow(cc.y, 1.7);
+    float e = texture2D(uHistory, vec2(freq, row)).r;
+    return pow(e, 0.85);
+  }
+
   float content(float mode, float shape, vec2 cc) {
     if (mode < 0.5) return spectrumContent(cc);
     if (mode < 1.5) return shapeContent(shape, cc);
-    return textContent(cc);
+    if (mode < 2.5) return textContent(cc);
+    return heatContent(cc);
+  }
+
+  // Inferno-style heat ramp: black, deep violet, magenta, orange, yellow, white
+  vec3 heatRamp(float t) {
+    t = clamp(t, 0.0, 1.0);
+    vec3 c = vec3(0.0);
+    c.r = smoothstep(0.08, 0.6, t);
+    c.g = smoothstep(0.35, 0.9, t) * 0.95;
+    c.b = 0.55 * smoothstep(0.0, 0.25, t) * (1.0 - smoothstep(0.35, 0.7, t)) + smoothstep(0.85, 1.0, t);
+    return c;
+  }
+
+  // Colour a content luminance for its mode: palette hues for spectrum, shapes
+  // and text; the inferno ramp for the heat map.
+  vec3 colorFor(float mode, float lum, vec2 cc) {
+    if (mode > 2.5) {
+      vec3 heat = heatRamp(lum);
+      vec3 bg = vec3(0.02, 0.0, 0.03);
+      return mix(bg, heat, smoothstep(0.02, 0.15, lum)) * (0.8 + lum * 0.9);
+    }
+    // spectrum is fully saturated; shapes and text lean cinematic / desaturated
+    float sat = uSat * (mode < 0.5 ? 1.0 : 0.55);
+    float light = mode < 0.5 ? 0.55 : 0.72;
+    float d = distance(cc, vec2(0.5));
+    float hue = uHue + cc.y * 0.06 + d * 0.04;
+    vec3 col = hsl2rgb(vec3(fract(hue), sat, light));
+    vec3 bg = hsl2rgb(vec3(fract(uHue + 0.08), uSat * 0.6, 0.05));
+    float flash = uBeat * 0.25 * step(mode, 0.5);
+    lum = clamp(lum + flash, 0.0, 1.0);
+    return mix(bg, col, lum) * (0.7 + lum * 1.1);
   }
 
   void main() {
@@ -315,21 +384,9 @@ export const ledFragment = /* glsl */ `
     float edge = smoothstep(0.0, 0.12, cuv.x) * smoothstep(0.0, 0.12, cuv.y)
                * smoothstep(1.0, 0.88, cuv.x) * smoothstep(1.0, 0.88, cuv.y);
 
-    float lumA = content(uModeA, uShapeA, cc);
-    float lumB = content(uModeB, uShapeB, cc);
-    float lum = mix(lumA, lumB, uBlend);
-    float mode = mix(uModeA, uModeB, uBlend);
-    // spectrum is fully saturated; shapes and text lean cinematic / desaturated
-    float sat = uSat * (mode < 0.5 ? 1.0 : 0.55);
-    float light = mode < 0.5 ? 0.55 : 0.72;
-
-    float d = distance(cc, vec2(0.5));
-    float hue = uHue + cc.y * 0.06 + d * 0.04;
-    vec3 col = hsl2rgb(vec3(fract(hue), sat, light));
-    vec3 bg = hsl2rgb(vec3(fract(uHue + 0.08), uSat * 0.6, 0.05));
-    float flash = uBeat * 0.25 * step(mode, 0.5);
-    lum = clamp(lum + flash, 0.0, 1.0);
-    vec3 outCol = mix(bg, col, lum) * edge * uIntensity * (0.7 + lum * 1.1);
+    vec3 colA = colorFor(uModeA, content(uModeA, uShapeA, cc), cc);
+    vec3 colB = colorFor(uModeB, content(uModeB, uShapeB, cc), cc);
+    vec3 outCol = mix(colA, colB, uBlend) * edge * uIntensity;
     gl_FragColor = vec4(outCol * uWall, 1.0);
   }
 `;
@@ -370,8 +427,11 @@ export const pyroFragment = /* glsl */ `
     float d = length(c);
     if (d > 0.5) discard;
     float glow = smoothstep(0.5, 0.0, d);
-    vec3 col = mix(vec3(1.0, 0.95, 0.8), uColor, smoothstep(0.0, 0.35, vAge));
-    col = mix(col, uColor * 0.4, smoothstep(0.6, 1.0, vAge));
+    // fire: bright yellow core, orange body, yellow embers that dim out
+    vec3 yellow = vec3(1.0, 0.9, 0.35);
+    vec3 orange = vec3(1.0, 0.45, 0.08);
+    vec3 col = mix(yellow, orange, smoothstep(0.05, 0.45, vAge));
+    col = mix(col, yellow * 0.7, smoothstep(0.55, 0.9, vAge));
     float a = glow * (1.0 - vAge);
     gl_FragColor = vec4(col * a * 1.5, a);
   }

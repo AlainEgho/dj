@@ -9,7 +9,10 @@ import { useSettings } from '../state/settingsStore';
 import { WALL_SHAPE_COUNT, type WallMode } from '../state/presets';
 
 const BINS = 64;
-const MODE_INDEX = { spectrum: 0, shapes: 1, text: 2 } as const;
+const MODE_INDEX = { spectrum: 0, shapes: 1, text: 2, heatmap: 3 } as const;
+/** rows of spectrum history kept for the heat map (about 8s at ~8 rows/s) */
+const HISTORY_ROWS = 64;
+const HISTORY_INTERVAL = 0.12;
 /** in forced Text mode, swap to another random word this often (seconds) */
 const FORCED_TEXT_ROTATE = 8;
 /** a word is on the wall for at most this long (type-in included) before it fades */
@@ -18,6 +21,7 @@ const WORD_FADE = 0.8;
 
 function resolveMode(wallMode: WallMode, hasText: boolean): number {
   if (wallMode === 'spectrum') return 0;
+  if (wallMode === 'heatmap') return 3;
   if (wallMode === 'shapes') return 1;
   if (wallMode === 'text') return hasText ? 2 : 1;
   const auto = director.wallContent;
@@ -47,14 +51,22 @@ export function LEDBackdrop() {
   const settings = useSettings();
   const words = useMemo(() => splitWords(settings.wallText), [settings.wallText]);
 
-  const { spectrumTex, spectrumData } = useMemo(() => {
+  const { spectrumTex, spectrumData, historyTex, historyData } = useMemo(() => {
     const d = new Uint8Array(BINS * 4);
     const t = new THREE.DataTexture(d, BINS, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
     t.magFilter = THREE.LinearFilter;
     t.minFilter = THREE.LinearFilter;
     t.generateMipmaps = false;
     t.needsUpdate = true;
-    return { spectrumTex: t, spectrumData: d };
+    // ring buffer of past spectra for the heat map: one row per HISTORY_INTERVAL
+    const hd = new Uint8Array(BINS * HISTORY_ROWS * 4);
+    const ht = new THREE.DataTexture(hd, BINS, HISTORY_ROWS, THREE.RGBAFormat, THREE.UnsignedByteType);
+    ht.magFilter = THREE.LinearFilter;
+    ht.minFilter = THREE.LinearFilter;
+    ht.wrapT = THREE.RepeatWrapping;
+    ht.generateMipmaps = false;
+    ht.needsUpdate = true;
+    return { spectrumTex: t, spectrumData: d, historyTex: ht, historyData: hd };
   }, []);
 
   const textTex = useRef<TextTexture>(makeTextTexture(' '));
@@ -66,6 +78,8 @@ export function LEDBackdrop() {
         fragmentShader: ledFragment,
         uniforms: {
           uSpectrum: { value: spectrumTex },
+          uHistory: { value: historyTex },
+          uHistRow: { value: 0 },
           uText: { value: textTex.current },
           uTextPx: { value: textTex.current.px },
           uTextLen: { value: textTex.current.glyphs },
@@ -97,9 +111,10 @@ export function LEDBackdrop() {
       material.dispose();
       geometry.dispose();
       spectrumTex.dispose();
+      historyTex.dispose();
       textTex.current.dispose();
     },
-    [material, geometry, spectrumTex],
+    [material, geometry, spectrumTex, historyTex],
   );
 
   /** Swap the displayed word; rebuilds the texture only when it changes. */
@@ -114,7 +129,18 @@ export function LEDBackdrop() {
   };
 
   // crossfade bookkeeping
-  const fade = useRef({ modeA: 0, shapeA: 0, modeB: 0, shapeB: 0, blend: 1, shownSince: 0, lastRotate: 0, forcedIndex: 0 });
+  const fade = useRef({
+    modeA: 0,
+    shapeA: 0,
+    modeB: 0,
+    shapeB: 0,
+    blend: 1,
+    shownSince: 0,
+    lastRotate: 0,
+    forcedIndex: 0,
+    histRow: 0,
+    histLast: 0,
+  });
 
   useFrame(() => {
     const s = stage;
@@ -133,6 +159,14 @@ export function LEDBackdrop() {
     spectrumTex.needsUpdate = true;
 
     const f = fade.current;
+    // Heat map history: copy the current spectrum row into the ring buffer at a fixed rate
+    if (s.time - f.histLast >= HISTORY_INTERVAL) {
+      f.histLast = s.time;
+      f.histRow = (f.histRow + 1) % HISTORY_ROWS;
+      historyData.set(spectrumData, f.histRow * BINS * 4);
+      historyTex.needsUpdate = true;
+      material.uniforms.uHistRow.value = (f.histRow + 0.5) / HISTORY_ROWS;
+    }
     const hasText = words.length > 0;
     const wantMode = resolveMode(s.settings.wallMode, hasText);
     const wantShape = s.settings.wallMode === 'shapes' ? s.settings.wallShape : director.shape;

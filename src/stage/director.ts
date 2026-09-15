@@ -27,7 +27,7 @@ export type Look =
   | 'festival'
   | 'lasersBeams'
   | 'full';
-export type WallContent = 'spectrum' | 'shapes' | 'text';
+export type WallContent = 'spectrum' | 'heatmap' | 'shapes' | 'text';
 
 interface Targets {
   wall: number;
@@ -44,8 +44,11 @@ interface Targets {
   laserAim: number;
 }
 
-/** Which laser fixtures are active: truss only, floor only, centre only, or all. */
-export type LaserGroup = 'top' | 'bottom' | 'middle' | 'all';
+/**
+ * Which laser fixtures are active: the truss centre only, the whole truss row,
+ * the floor centre only, the whole floor row, or everything.
+ */
+export type LaserGroup = 'topMiddle' | 'top' | 'bottomMiddle' | 'bottom' | 'all';
 
 /** palettes the Auto palette rotates through */
 const AUTO_PALETTES = ['tomorrow', 'ultra', 'oracle', 'sunset', 'acid', 'ice'];
@@ -56,9 +59,10 @@ export interface DirectorState extends Targets {
   /** palette id chosen by the director when the palette setting is 'auto' */
   autoPalette: string;
   /** crossfaded 0..1 weights for each laser group */
+  gTopMid: number;
   gTop: number;
+  gBotMid: number;
   gBottom: number;
-  gMiddle: number;
   gAll: number;
   shape: number;
   wallContent: WallContent;
@@ -139,9 +143,10 @@ export const director: DirectorState = {
   ...TARGETS.wallBeams,
   laserGroup: 'all',
   autoPalette: 'tomorrow',
-  gTop: 1,
-  gBottom: 1,
-  gMiddle: 1,
+  gTopMid: 0,
+  gTop: 0,
+  gBotMid: 0,
+  gBottom: 0,
   gAll: 1,
   shape: 0,
   wallContent: 'spectrum',
@@ -161,6 +166,8 @@ let beatsInPhrase = 0;
 let phraseStart = 0;
 let quietTime = 0;
 let cuesSincePalette = 0;
+let groupBeats = 0;
+let groupStart = 0;
 let wallLooksSeen = 0;
 let target: Targets = TARGETS.wallBeams;
 let time = 0;
@@ -197,7 +204,7 @@ function startCue(look: Look, settings: StageSettings) {
       director.wallContent = 'text';
       director.textIndex = Math.floor(Math.random() * words.length);
     } else if (director.energy > 0.7 && roll < 0.55) {
-      director.wallContent = 'spectrum';
+      director.wallContent = director.wallContent === 'spectrum' ? 'heatmap' : 'spectrum';
     } else {
       director.wallContent = 'shapes';
       director.shape = (director.shape + 1 + Math.floor(Math.random() * 3)) % WALL_SHAPE_COUNT;
@@ -213,9 +220,10 @@ function startCue(look: Look, settings: StageSettings) {
 function pickLaserGroup(settings: StageSettings, energy: number, prev: LaserGroup): LaserGroup {
   const hasTop = settings.rigStyle !== 'arena';
   let pool: LaserGroup[];
-  if (energy < 0.3) pool = hasTop ? ['middle', 'top', 'middle'] : ['middle', 'bottom'];
-  else if (energy < 0.62) pool = hasTop ? ['bottom', 'top', 'middle', 'all'] : ['bottom', 'middle', 'all'];
-  else pool = hasTop ? ['all', 'all', 'bottom', 'top'] : ['all', 'all', 'bottom'];
+  if (energy < 0.3) pool = ['bottomMiddle', 'topMiddle', 'bottomMiddle'];
+  else if (energy < 0.62) pool = ['bottom', 'top', 'bottomMiddle', 'topMiddle'];
+  else pool = ['all', 'bottom', 'top', 'all', 'bottomMiddle'];
+  if (!hasTop) pool = pool.map((g) => (g === 'top' ? 'bottom' : g === 'topMiddle' ? 'bottomMiddle' : g));
   const options = pool.filter((g) => g !== prev);
   return options.length ? options[Math.floor(Math.random() * options.length)] : pool[0];
 }
@@ -302,7 +310,13 @@ export function updateDirector(
     const minSeconds = 8 + (1 - settings.pacing) * 12;
     const phraseDone = beatsInPhrase >= phraseBeats || time - phraseStart > maxSeconds;
     if (phraseDone && time - phraseStart > minSeconds) {
-      startCue(pick(poolFor(settings.rigStyle, director.energy), director.look), settings);
+      // A laser phrase is followed by the mesh half of the time, so the fans
+      // visibly fold into the lattice (the lasers -> mesh transition).
+      const prev = director.look;
+      const laserPhrase = prev === 'laserSweep' || prev === 'laserAudience' || prev === 'lasersBeams';
+      if (laserPhrase && settings.rigStyle !== 'festival' && Math.random() < 0.5) startCue('laserMesh', settings);
+      else if (prev === 'laserMesh' && Math.random() < 0.4) startCue('laserSweep', settings);
+      else startCue(pick(poolFor(settings.rigStyle, director.energy), prev), settings);
     }
   }
 
@@ -310,20 +324,33 @@ export function updateDirector(
   director.white *= Math.pow(0.5, dt / 2.5);
   if (director.white < 0.01) director.white = 0;
 
-  // Laser groups: a surge in the music mid-phrase opens every fixture.
-  if (director.laserGroup !== 'all' && energyFast > 0.78 && director.cueTime > 2) director.laserGroup = 'all';
+  // Laser groups change every 8 beats (or ~6-10s without a tempo), independent
+  // of the look, so the source of the beams keeps moving with the music. A big
+  // surge at high energy opens every fixture at once.
+  if (settings.cue === 'auto' && settings.autoCues) {
+    if (audio.beat) groupBeats++;
+    const groupSeconds = 6 + (1 - settings.pacing) * 4;
+    if (groupBeats >= 8 || time - groupStart > groupSeconds) {
+      groupBeats = 0;
+      groupStart = time;
+      director.laserGroup = pickLaserGroup(settings, director.energy, director.laserGroup);
+    }
+    if (director.laserGroup !== 'all' && energyFast > 0.85 && director.energy > 0.6) director.laserGroup = 'all';
+  }
   const gRate = Math.min(1, dt / 1.2);
   const g = director.laserGroup;
+  director.gTopMid += ((g === 'topMiddle' ? 1 : 0) - director.gTopMid) * gRate;
   director.gTop += ((g === 'top' ? 1 : 0) - director.gTop) * gRate;
+  director.gBotMid += ((g === 'bottomMiddle' ? 1 : 0) - director.gBotMid) * gRate;
   director.gBottom += ((g === 'bottom' ? 1 : 0) - director.gBottom) * gRate;
-  director.gMiddle += ((g === 'middle' ? 1 : 0) - director.gMiddle) * gRate;
   director.gAll += ((g === 'all' ? 1 : 0) - director.gAll) * gRate;
 
   // Crossfade weights (2.6s at slow pacing, 1.2s at fast pacing)
   const rate = Math.min(1, dt / (2.6 - settings.pacing * 1.4));
   director.wall += (target.wall - director.wall) * rate;
   director.lasers += (target.lasers - director.lasers) * rate;
-  director.mesh += (target.mesh - director.mesh) * rate;
+  // the fold from fans into the mesh lattice (and back) is slower and deliberate
+  director.mesh += (target.mesh - director.mesh) * Math.min(1, dt / 4.0);
   director.sheet += (target.sheet - director.sheet) * rate;
   director.beams += (target.beams - director.beams) * rate;
   director.strobe += (target.strobe - director.strobe) * rate;

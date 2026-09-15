@@ -148,9 +148,13 @@ export function LaserRig() {
       const m = materials[i];
       const f = fixtures[i];
       if (!g) continue;
-      // Which fixtures fire this phrase (truss / floor / centre / all), crossfaded
+      // Which fixtures fire right now: top centre, whole top row, bottom centre,
+      // whole bottom row, or everything; weights crossfade between groups.
       const isMiddle = Math.abs(f.x) < 6;
-      const groupFactor = Math.max(director.gAll, f.fromTruss ? director.gTop : director.gBottom, isMiddle ? director.gMiddle : 0);
+      const rowWeight = f.fromTruss
+        ? Math.max(director.gTop, isMiddle ? director.gTopMid : 0)
+        : Math.max(director.gBottom, isMiddle ? director.gBotMid : 0);
+      const groupFactor = Math.max(director.gAll, rowWeight);
       const fixtureWeight = weight * groupFactor;
       const visible = fixtureWeight > 0.01;
       g.visible = visible;

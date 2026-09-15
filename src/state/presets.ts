@@ -1,5 +1,5 @@
 export type ShowMode = 'chill' | 'festival' | 'rave' | 'custom';
-export type WallMode = 'auto' | 'spectrum' | 'shapes' | 'text' | 'off';
+export type WallMode = 'auto' | 'spectrum' | 'heatmap' | 'shapes' | 'text' | 'off';
 
 /** Lighting cues the director can call; 'auto' lets it pick per phrase. */
 export type CueId =
@@ -46,15 +46,16 @@ export const RIG_STYLES: { id: RigStyle; label: string }[] = [
 export const WALL_SHAPES = [
   { id: 0, name: 'Eclipse' },
   { id: 1, name: 'Rings' },
-  { id: 2, name: 'Bars' },
+  { id: 2, name: 'Pixel rain' },
   { id: 3, name: 'Rays' },
   { id: 4, name: 'Tunnel' },
   { id: 5, name: 'Waves' },
   { id: 6, name: 'Oracle Eye' },
   { id: 7, name: 'Temple' },
   { id: 8, name: 'Clouds' },
+  { id: 9, name: 'Streaks' },
 ] as const;
-export const WALL_SHAPE_COUNT = 9;
+export const WALL_SHAPE_COUNT = 10;
 
 export interface StageSettings {
   paletteId: string;
