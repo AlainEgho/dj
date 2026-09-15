@@ -7,6 +7,7 @@ import { Btn } from './ControlBar';
 import { Slider } from './Slider';
 import { theme } from './theme';
 import { KEYMAP, describeKey } from './keymap';
+import { RECORD_QUALITIES } from './recorder';
 
 const MODES: { id: ShowMode; label: string; blurb: string }[] = [
   { id: 'chill', label: 'Chill', blurb: 'Slow sweeps, no strobes' },
@@ -212,6 +213,27 @@ export function SettingsPanel() {
           </View>
         ))}
       </Section>
+
+      {Platform.OS === 'web' ? (
+        <Section title="Recording">
+          <Text style={[styles.note, { marginBottom: 6 }]}>Resolution while recording</Text>
+          <View style={styles.chips}>
+            {(Object.keys(RECORD_QUALITIES) as StageSettings['recordQuality'][]).map((q) => (
+              <Pressable
+                key={q}
+                onPress={() => set({ recordQuality: q })}
+                style={[styles.paletteChip, s.recordQuality === q && styles.chipActive]}
+              >
+                <Text style={styles.chipTitle}>{RECORD_QUALITIES[q].label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.note}>
+            The stage renders at this height only while recording, then drops back. 1440p and 4K need a strong GPU to hold 60 fps.
+            Files are MP4 (H.264 + AAC) where the browser supports it.
+          </Text>
+        </Section>
+      ) : null}
 
       {Platform.OS === 'web' ? (
         <Section title="Keyboard">

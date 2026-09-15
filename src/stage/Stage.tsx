@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from './fiber';
@@ -11,6 +11,7 @@ import { PyroBurst } from './PyroBurst';
 import { LEDBackdrop } from './LEDBackdrop';
 import { Haze } from './Haze';
 import { Rig } from './Rig';
+import { useRecorder } from '../ui/recorder';
 
 /**
  * Runs first every frame (priority -1): pulls the audio frame, updates the
@@ -45,6 +46,25 @@ function StageDriver() {
   return null;
 }
 
+/**
+ * Render resolution: normally the device pixel ratio (capped at 1.5). While a
+ * recording is being prepared or running, render at the requested vertical
+ * resolution (1080p / 1440p / 4K) regardless of the window size.
+ */
+function RenderScale() {
+  const setDpr = useThree((s) => s.setDpr);
+  const height = useThree((s) => s.size.height);
+  const rec = useRecorder();
+  const active = rec.recording || rec.preparing;
+  const target = rec.targetHeight;
+  useEffect(() => {
+    const base = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 1.5);
+    if (active && target > 0 && height > 0) setDpr(Math.max(1, Math.min(4, target / height)));
+    else setDpr(base);
+  }, [active, target, height, setDpr]);
+  return null;
+}
+
 export function Stage() {
   return (
     <View style={styles.container}>
@@ -59,6 +79,7 @@ export function Stage() {
         }}
       >
         <StageDriver />
+        <RenderScale />
         <Rig />
         <LEDBackdrop />
         <Haze />

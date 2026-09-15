@@ -6,15 +6,29 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import { getRecordingAudioStream } from '../audio/useAudioAnalyzer';
+import type { StageSettings } from '../state/presets';
+import { settingsStore } from '../state/settingsStore';
 
 export interface RecorderState {
   supported: boolean;
   recording: boolean;
+  /** true while the stage is being re-rendered at recording resolution, before capture starts */
+  preparing: boolean;
+  /** target vertical resolution in pixels while recording (0 = screen size) */
+  targetHeight: number;
   /** seconds recorded so far */
   seconds: number;
   error: string | null;
   lastFileName: string | null;
 }
+
+/** Vertical resolution and video bitrate per quality setting. */
+export const RECORD_QUALITIES: Record<StageSettings['recordQuality'], { height: number; bitrate: number; label: string }> = {
+  screen: { height: 0, bitrate: 12_000_000, label: 'Screen size' },
+  '1080': { height: 1080, bitrate: 16_000_000, label: '1080p' },
+  '1440': { height: 1440, bitrate: 28_000_000, label: '1440p' },
+  '2160': { height: 2160, bitrate: 45_000_000, label: '4K' },
+};
 
 type Listener = () => void;
 
@@ -25,7 +39,15 @@ const supported =
   typeof HTMLCanvasElement !== 'undefined' &&
   'captureStream' in HTMLCanvasElement.prototype;
 
-let state: RecorderState = { supported, recording: false, seconds: 0, error: null, lastFileName: null };
+let state: RecorderState = {
+  supported,
+  recording: false,
+  preparing: false,
+  targetHeight: 0,
+  seconds: 0,
+  error: null,
+  lastFileName: null,
+};
 const listeners = new Set<Listener>();
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
@@ -63,24 +85,43 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
+/** Wait until the stage canvas has been re-rendered at (about) the requested height. */
+async function waitForCanvasHeight(canvas: HTMLCanvasElement, target: number) {
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    if (target === 0 || canvas.height >= target * 0.95) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  // one more frame so the first captured frame is at the new size
+  await new Promise((r) => requestAnimationFrame(() => r(null)));
+}
+
 export function startRecording(): string {
   if (!supported) {
     set({ error: 'Recording needs a desktop browser (Chrome, Edge or Firefox).' });
     return 'Recording not supported here';
   }
-  if (state.recording) return 'Already recording';
+  if (state.recording || state.preparing) return 'Already recording';
   const canvas = document.querySelector('canvas');
   if (!canvas) {
     set({ error: 'No stage canvas on this screen.' });
     return 'No stage to record';
   }
+  const quality = RECORD_QUALITIES[settingsStore.getSettings().recordQuality] ?? RECORD_QUALITIES['1080'];
+  // ask the stage to render at recording resolution, then capture
+  set({ preparing: true, targetHeight: quality.height, error: null });
+  void waitForCanvasHeight(canvas, quality.height).then(() => beginCapture(canvas, quality.bitrate));
+  return quality.height ? `Recording ${quality.label}...` : 'Recording...';
+}
+
+function beginCapture(canvas: HTMLCanvasElement, videoBitsPerSecond: number) {
   try {
     canvasStream = canvas.captureStream(60);
     const audio = getRecordingAudioStream();
     const tracks = [...canvasStream.getVideoTracks(), ...(audio ? audio.getAudioTracks() : [])];
     const mixed = new MediaStream(tracks);
     const { mime, ext } = pickMime();
-    recorder = new MediaRecorder(mixed, mime ? { mimeType: mime, videoBitsPerSecond: 12_000_000, audioBitsPerSecond: 192_000 } : undefined);
+    recorder = new MediaRecorder(mixed, mime ? { mimeType: mime, videoBitsPerSecond, audioBitsPerSecond: 192_000 } : undefined);
     chunks = [];
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -99,7 +140,7 @@ export function startRecording(): string {
       canvasStream?.getTracks().forEach((t) => t.stop());
       canvasStream = null;
       recorder = null;
-      set({ recording: false, lastFileName: name });
+      set({ recording: false, preparing: false, targetHeight: 0, lastFileName: name });
     };
     // if the canvas unmounts (screen change) the video track ends: finalize
     canvasStream.getVideoTracks()[0]?.addEventListener('ended', () => stopRecording());
@@ -107,15 +148,18 @@ export function startRecording(): string {
     startedAt = Date.now();
     if (timer) clearInterval(timer);
     timer = setInterval(() => set({ seconds: Math.floor((Date.now() - startedAt) / 1000) }), 500);
-    set({ recording: true, seconds: 0, error: null });
-    return audio ? `Recording ${ext.toUpperCase()} with sound` : `Recording ${ext.toUpperCase()} (no audio source yet)`;
+    set({ recording: true, preparing: false, seconds: 0, error: null });
+    if (!audio) set({ error: `Recording ${ext.toUpperCase()} without sound: start a source first next time.` });
   } catch (e) {
-    set({ error: e instanceof Error ? e.message : String(e) });
-    return 'Recording failed';
+    set({ preparing: false, targetHeight: 0, error: e instanceof Error ? e.message : String(e) });
   }
 }
 
 export function stopRecording(): string {
+  if (state.preparing && !recorder) {
+    set({ preparing: false, targetHeight: 0 });
+    return 'Recording cancelled';
+  }
   if (!recorder || recorder.state === 'inactive') return 'Not recording';
   if (timer) clearInterval(timer);
   timer = null;
@@ -124,7 +168,7 @@ export function stopRecording(): string {
 }
 
 export function toggleRecording(): string {
-  return state.recording ? stopRecording() : startRecording();
+  return state.recording || state.preparing ? stopRecording() : startRecording();
 }
 
 export function useRecorder(): RecorderState {

@@ -195,6 +195,25 @@ export const ledFragment = /* glsl */ `
     return max(max(bar, ripple), max(sparkle, cloud));
   }
 
+  // Signed distance to a rounded box centred at c
+  float sdRBox(vec2 p, vec2 c, vec2 hs, float r) {
+    vec2 q = abs(p - c) - hs + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  }
+  // Giant humanoid silhouette (head, neck, torso, shoulders, arms, legs)
+  float robotInside(vec2 p) {
+    float d = sdRBox(p, vec2(0.0, 0.30), vec2(0.11, 0.12), 0.04);           // head
+    d = min(d, sdRBox(p, vec2(0.0, 0.16), vec2(0.045, 0.035), 0.01));         // neck
+    d = min(d, sdRBox(p, vec2(0.0, -0.03), vec2(0.25, 0.17), 0.05));          // torso
+    d = min(d, sdRBox(p, vec2(-0.31, 0.09), vec2(0.075, 0.05), 0.03));        // shoulders
+    d = min(d, sdRBox(p, vec2(0.31, 0.09), vec2(0.075, 0.05), 0.03));
+    d = min(d, sdRBox(p, vec2(-0.355, -0.10), vec2(0.05, 0.17), 0.03));       // arms
+    d = min(d, sdRBox(p, vec2(0.355, -0.10), vec2(0.05, 0.17), 0.03));
+    d = min(d, sdRBox(p, vec2(-0.11, -0.36), vec2(0.085, 0.16), 0.03));       // legs
+    d = min(d, sdRBox(p, vec2(0.11, -0.36), vec2(0.085, 0.16), 0.03));
+    return step(d, 0.0);
+  }
+
   // Stepped-pyramid silhouette: 5 tiers from y=-0.44 up to y=0.30
   float templeInside(vec2 p) {
     float base = -0.44;
@@ -273,6 +292,24 @@ export const ledFragment = /* glsl */ `
       float spokes = smoothstep(0.6, 1.0, sin(atan(p.y, p.x) * 12.0 + t * 0.4)) * step(ir, 0.19) * step(0.08, ir) * 0.5;
       float pupil = smoothstep(0.012, 0.0, ir - (0.075 - uBass * 0.03));
       v = max(max(outline, (iris + spokes + pupil) * almond), 0.0);
+    } else if (shape > 9.5) {
+      // Robot: giant humanoid outline that breathes and sways, with eyes and a
+      // chest core pulsing on the bass and a scanline sweeping down the body.
+      vec2 q = p;
+      q.x -= sin(t * 0.3) * 0.03;
+      q.y = (q.y + 0.02) / (1.0 + sin(t * 0.8) * 0.012);
+      float d = 0.028;
+      float inside = robotInside(q);
+      float eroded = min(min(robotInside(q + vec2(d, 0.0)), robotInside(q - vec2(d, 0.0))),
+                         min(robotInside(q + vec2(0.0, d)), robotInside(q - vec2(0.0, d))));
+      float outline = inside * (1.0 - eroded);
+      float eyes = max(step(sdRBox(q, vec2(-0.045, 0.31), vec2(0.032, 0.012), 0.005), 0.0),
+                       step(sdRBox(q, vec2(0.045, 0.31), vec2(0.032, 0.012), 0.005), 0.0));
+      float core = smoothstep(0.012, 0.0, abs(length(q - vec2(0.0, -0.03)) - (0.045 + uBass * 0.02)) - 0.008);
+      float scanY = 0.5 - mod(t * 0.12, 1.1);
+      float scan = smoothstep(0.02, 0.0, abs(q.y - scanY)) * inside * 0.55;
+      float fill = inside * 0.06;
+      v = max(max(outline * 0.9, fill), max(max(eyes * (0.8 + uBass * 0.4), core), scan));
     } else if (shape > 8.5) {
       // Streaks: the rain turned sideways, pixels racing across each row,
       // alternating direction per row, brighter with the level

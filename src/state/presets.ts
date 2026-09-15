@@ -54,8 +54,9 @@ export const WALL_SHAPES = [
   { id: 7, name: 'Temple' },
   { id: 8, name: 'Clouds' },
   { id: 9, name: 'Streaks' },
+  { id: 10, name: 'Robot' },
 ] as const;
-export const WALL_SHAPE_COUNT = 10;
+export const WALL_SHAPE_COUNT = 11;
 
 export interface StageSettings {
   paletteId: string;
@@ -91,6 +92,8 @@ export interface StageSettings {
   laserGroup: 'auto' | 'topMiddle' | 'top' | 'bottomMiddle' | 'bottom' | 'all';
   /** manual blackout (held from the keyboard) */
   blackout: boolean;
+  /** vertical resolution the stage renders at while recording */
+  recordQuality: 'screen' | '1080' | '1440' | '2160';
   /** LED wall content */
   wallMode: WallMode;
   wallShape: number;
@@ -120,6 +123,7 @@ export const DEFAULT_SETTINGS: StageSettings = {
   rigStyle: 'mix',
   laserGroup: 'auto',
   blackout: false,
+  recordQuality: '1080',
   wallMode: 'auto',
   wallShape: 0,
   wallText: '',
