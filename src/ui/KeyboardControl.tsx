@@ -92,8 +92,8 @@ export function KeyboardControl() {
               {groups.map((g) => (
                 <View key={g} style={styles.column}>
                   <Text style={styles.groupTitle}>{g}</Text>
-                  {KEYMAP.filter((b) => b.group === g).map((b) => (
-                    <View key={`${g}-${describeKey(b)}`} style={styles.row}>
+                  {KEYMAP.filter((b) => b.group === g).map((b, bi) => (
+                    <View key={`${g}-${bi}`} style={styles.row}>
                       <Text style={styles.key}>{describeKey(b)}</Text>
                       <Text style={styles.label}>{b.label}</Text>
                     </View>

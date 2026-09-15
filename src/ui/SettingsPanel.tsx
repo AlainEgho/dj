@@ -224,6 +224,24 @@ export function SettingsPanel() {
           onChange={(v) => set({ strobeSensitivity: v })}
           format={(v) => (v < 0.15 ? 'Off unless cued' : v < 0.5 ? 'Rare' : v < 0.8 ? 'Normal' : 'Eager')}
         />
+        <Slider
+          label="Laser stroboscope"
+          value={s.laserStrobe}
+          onChange={(v) => set({ laserStrobe: v })}
+          format={(v) =>
+            v < 0.02 ? 'Off (steady beams)' : v < 0.33 ? 'Quarter notes' : v < 0.66 ? 'Eighth notes' : 'Hard (16ths)'
+          }
+        />
+        <Slider
+          label="Mirror chase"
+          value={s.mirrorChase}
+          onChange={(v) => set({ mirrorChase: v })}
+          format={(v) => (v < 0.02 ? 'Off' : v < 0.5 ? 'Subtle' : v < 0.85 ? 'Normal' : 'Full')}
+        />
+        <Text style={[styles.note, { marginBottom: 8 }]}>
+          Mirror chase opens the lasers and blinders from the centre outward in symmetric pairs, one step per beat, then closes
+          back in.
+        </Text>
         <Text style={[styles.note, { marginBottom: 8 }]}>
           How hard each family follows the track. During speech or any beatless passage both ease off on their own and the
           heads open to the crowd.
@@ -296,8 +314,8 @@ export function SettingsPanel() {
           {Array.from(new Set(KEYMAP.map((b) => b.group))).map((g) => (
             <View key={g} style={{ marginBottom: 8 }}>
               <Text style={[styles.note, { color: theme.accent, fontWeight: '700', marginBottom: 4 }]}>{g}</Text>
-              {KEYMAP.filter((b) => b.group === g).map((b) => (
-                <View key={`${g}-${describeKey(b)}`} style={styles.keyRow}>
+              {KEYMAP.filter((b) => b.group === g).map((b, bi) => (
+                <View key={`${g}-${bi}`} style={styles.keyRow}>
                   <Text style={styles.keyCap}>{describeKey(b)}</Text>
                   <Text style={styles.note}>{b.label}</Text>
                 </View>

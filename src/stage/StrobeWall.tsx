@@ -41,6 +41,8 @@ export function StrobeWall() {
 
   const flash = useRef(new Float32Array(PANELS));
   const lastChatter = useRef(0);
+  /** beat counter for the mirrored chase */
+  const beatIdx = useRef(0);
   const lightRef = useRef<THREE.PointLight>(null);
 
   useFrame(() => {
@@ -71,6 +73,22 @@ export function StrobeWall() {
       if (chatterRate > 0 && s.time - lastChatter.current > chatterRate) {
         lastChatter.current = s.time;
         f[Math.floor(Math.random() * PANELS)] = 0.6 * allow;
+      }
+    }
+
+    // Mirrored chase: panels fire in symmetric pairs opening from the centre
+    // outward on each beat, then closing back in, matching the laser chase.
+    const chaseAmt = s.settings.mirrorChase;
+    if (chaseAmt > 0.02 && allow > 0.05 && s.beat) {
+      beatIdx.current++;
+      const mid = (PANELS - 1) / 2;
+      const span = Math.ceil(PANELS / 2);
+      const pos = beatIdx.current % (span * 2);
+      const front = pos < span ? pos : span * 2 - 1 - pos;
+      for (let i = 0; i < PANELS; i++) {
+        // rank = distance from the centre, so i and its mirror share a rank
+        const rank = Math.round(Math.abs(i - mid));
+        if (rank === front) f[i] = Math.max(f[i], allow * chaseAmt);
       }
     }
 

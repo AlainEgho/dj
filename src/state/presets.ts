@@ -141,6 +141,13 @@ export interface StageSettings {
   beamSensitivity: number;
   /** 0..1 how readily the strobes and blinders fire (0 = never on their own) */
   strobeSensitivity: number;
+  /** 0..1 how hard the lasers strobe on the beat (0 = steady beams) */
+  laserStrobe: number;
+  /**
+   * Mirrored chase: fixtures switch on and off in symmetric pairs, opening from
+   * the centre outward and closing back in, in time with the beat. 0 = off.
+   */
+  mirrorChase: number;
   /** 0 = slow cinematic, 1 = fast club pacing */
   pacing: number;
   /** let the show director change looks on musical phrases */
@@ -182,9 +189,11 @@ export const DEFAULT_SETTINGS: StageSettings = {
   hazeEnabled: true,
   reactivity: 0.7,
   sensitivity: 0.5,
-  laserSensitivity: 0.5,
+  laserSensitivity: 0.75,
   beamSensitivity: 0.6,
   strobeSensitivity: 0.5,
+  laserStrobe: 0.45,
+  mirrorChase: 0.6,
   pacing: 0.25,
   autoCues: true,
   cue: 'auto',

@@ -44,8 +44,10 @@ const cycle =
     return `${name}: ${labels?.[next] ?? next}`;
   };
 
-const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '='];
-const cueBindings: KeyBinding[] = CUES.map((c, i) => ({
+// One key per cue. Cues without a key here are still available from Settings;
+// they simply get no binding (rather than an undefined one).
+const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '`'];
+const cueBindings: KeyBinding[] = CUES.filter((_, i) => cueKeys[i] !== undefined).map((c, i) => ({
   key: cueKeys[i],
   label: c.label,
   group: 'Cues',
@@ -243,8 +245,18 @@ export const KEYMAP: KeyBinding[] = [
 ];
 
 export function describeKey(b: KeyBinding): string {
+  // Defensive: a binding without a key must never crash the settings screen.
+  if (!b?.key) return '-';
   const name =
-    b.key === ' ' ? 'Space' : b.key.startsWith('Arrow') ? b.key.replace('Arrow', '') + ' arrow' : b.key.length === 1 ? b.key.toUpperCase() : b.key;
+    b.key === ' '
+      ? 'Space'
+      : b.key.startsWith('Arrow')
+        ? b.key.replace('Arrow', '') + ' arrow'
+        : b.key === '`'
+          ? 'Backtick'
+          : b.key.length === 1
+            ? b.key.toUpperCase()
+            : b.key;
   return b.shift ? `Shift + ${name}` : name;
 }
 

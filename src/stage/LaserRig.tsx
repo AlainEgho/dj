@@ -18,6 +18,33 @@ interface Fixture {
   speed: number;
   /** fixed pan used in mesh mode so fans cross each other */
   meshPan: number;
+  /** distance rank from the centre of its row (0 = innermost), for the mirror chase */
+  mirrorRank: number;
+  /** how many ranks its row has */
+  mirrorCount: number;
+}
+
+/**
+ * Rank each fixture by how far it sits from the centre of its own row, so a
+ * mirrored chase can open outward in symmetric pairs (0 = innermost).
+ */
+function assignMirrorRanks(fixtures: Fixture[]) {
+  for (const row of [true, false]) {
+    const inRow = fixtures.filter((f) => f.fromTruss === row);
+    const order = [...inRow].sort((a, b) => Math.abs(a.x) - Math.abs(b.x));
+    // pairs at the same distance share a rank, which is what makes it a mirror
+    let rank = -1;
+    let lastDist = -1;
+    for (const f of order) {
+      const d = Math.abs(f.x);
+      if (Math.abs(d - lastDist) > 0.01) {
+        rank++;
+        lastDist = d;
+      }
+      f.mirrorRank = rank;
+    }
+    for (const f of inRow) f.mirrorCount = rank + 1;
+  }
 }
 
 function buildFixtures(density: number, style: RigStyle): Fixture[] {
@@ -35,6 +62,8 @@ function buildFixtures(density: number, style: RigStyle): Fixture[] {
       phase: i * 2.1 + 0.7,
       speed: 0.7 + (i % 2) * 0.2,
       meshPan: (i % 2 === 0 ? -1 : 1) * (0.22 + (i % 3) * 0.06),
+      mirrorRank: 0,
+      mirrorCount: 1,
     });
   }
   // Truss-mounted lasers (the original festival rig) fire down and out over
@@ -52,8 +81,11 @@ function buildFixtures(density: number, style: RigStyle): Fixture[] {
       phase: i * 1.3,
       speed: 0.8 + (i % 3) * 0.15,
       meshPan: (i % 2 === 0 ? 1 : -1) * 0.3,
+      mirrorRank: 0,
+      mirrorCount: 1,
     });
   }
+  assignMirrorRanks(fixtures);
   return fixtures;
 }
 
@@ -121,6 +153,12 @@ export function LaserRig() {
 
   const fanRefs = useRef<(THREE.Group | null)[]>([]);
   const smooth = useRef({ mid: 0, amp: 0, build: 0 });
+  /**
+   * Beat state. Real laser rigs step to a new position on each beat rather than
+   * sweeping continuously, and the step is what reads as "on the beat".
+   * `step` counts beats, `punch` is a fast decay used for the flash.
+   */
+  const beat = useRef({ step: 0, punch: 0, lastPan: 0, panTarget: 0 });
 
   useFrame(() => {
     const s = stage;
@@ -143,8 +181,49 @@ export function LaserRig() {
     const wSheet = director.sheet * (1 - wMesh);
     const wAim = director.laserAim * (1 - wMesh - wSheet);
     const wSweep = Math.max(0, 1 - wMesh - wSheet - wAim);
+    // ---- beat step -------------------------------------------------------
+    // On each beat the fans jump to a new angle and flash, then hold until the
+    // next one. The step is scaled by laser sensitivity, so at 0 the rig keeps
+    // the old continuous sweep and never snaps.
+    const bt = beat.current;
+    if (s.beat && sens > 0.05) {
+      bt.step++;
+      bt.punch = 1;
+      // walk the fan position in a musical pattern rather than at random:
+      // right, left, centre, wide, so a bar reads as a phrase
+      const pattern = [0.55, -0.55, 0.12, -0.9, 0.9, -0.2];
+      bt.panTarget = pattern[bt.step % pattern.length];
+    }
+    bt.punch *= Math.pow(0.5, s.dt / 0.09); // ~90ms half-life
+
+    // ---- laser stroboscope ------------------------------------------------
+    // Beams chop on and off in time with the tempo. The duty cycle narrows as
+    // the strobe amount rises, so at full it is a hard flash rather than a beam.
+    const strobeAmt = s.settings.laserStrobe * sens;
+    const bpmNow = s.audio.bpm > 0 ? s.audio.bpm : 128;
+    const hz = (bpmNow / 60) * (strobeAmt > 0.66 ? 4 : strobeAmt > 0.33 ? 2 : 1); // 1/4 or 1/8 notes
+    const cyclePos = (s.time * hz) % 1;
+    const duty = 0.85 - strobeAmt * 0.6; // 0.85 (barely chopped) .. 0.25 (hard strobe)
+    const strobeGate = strobeAmt < 0.02 ? 1 : cyclePos < duty ? 1 : 1 - strobeAmt;
+
+    // ---- mirrored chase ----------------------------------------------------
+    // Fixtures open from the centre outward in symmetric pairs, one rank per
+    // beat, then close back in. Purely positional, so it reads as a mirror.
+    const chaseAmt = s.settings.mirrorChase;
+    const chaseStep = bt.step;
+    // snap toward the stepped position quickly, so it lands with the kick
+    bt.lastPan += (bt.panTarget - bt.lastPan) * Math.min(1, s.dt / 0.055);
+    const beatStep = sens;
+
     // when every fixture fires, slow the sweep a little so the picture stays readable
-    const sweepSpeed = s.pace * (0.15 + sm.mid * 0.25 * sens) * (1 + build * 0.6) * (1 - director.gAll * 0.35);
+    // Tempo drives rotation: a 128 BPM track sits at 1.0, faster tracks spin the
+    // fans harder, slower ones settle. Clamped so a bad tempo read cannot run away.
+    const bpm = s.audio.bpm;
+    const tempoScale = bpm > 0 ? Math.min(1.9, Math.max(0.55, bpm / 128)) : 1;
+    // With the beat step driving the pan, the continuous drift slows down so the
+    // two do not fight each other.
+    const sweepSpeed =
+      s.pace * (0.15 + sm.mid * 0.25 * sens) * (1 + build * 0.6) * (1 - director.gAll * 0.35) * (1 - sens * 0.45) * tempoScale;
     // whole-number line counts: a fractional count would shift every line each frame
     const sweepLines = Math.round(6 + s.settings.laserDensity * 4 + build * 5);
 
@@ -161,7 +240,17 @@ export function LaserRig() {
         ? Math.max(director.gTop, isMiddle ? director.gTopMid : 0)
         : Math.max(director.gBottom, isMiddle ? director.gBotMid : 0);
       const groupFactor = Math.max(director.gAll, rowWeight);
-      const fixtureWeight = weight * groupFactor;
+      // Mirror chase: a triangular wave over rank opens outward then closes in,
+      // advancing one rank per beat. Pairs either side of centre move together.
+      let chaseGate = 1;
+      if (chaseAmt > 0.02 && f.mirrorCount > 1) {
+        const span = f.mirrorCount;
+        const pos = chaseStep % (span * 2);
+        const front = pos < span ? pos : span * 2 - 1 - pos; // out then back
+        const lit = f.mirrorRank <= front ? 1 : 0;
+        chaseGate = 1 - chaseAmt * (1 - lit);
+      }
+      const fixtureWeight = weight * groupFactor * chaseGate * strobeGate;
       const visible = fixtureWeight > 0.01;
       g.visible = visible;
       laserColorFor(emitterMats[i].color, s.settings.laserColor, i, s.colorA, s.colorB)
@@ -175,11 +264,16 @@ export function LaserRig() {
       // camera. Tilt is measured from vertical toward the audience.
       // Sweep pose: fans rise and fall over the crowd, pan drifts slowly.
       const sweepTilt = (f.fromTruss ? 0.6 : 0.45) + Math.sin(t) * 0.2;
-      const sweepPan = Math.sin(t * 0.6 + f.phase) * 0.3;
+      // Continuous drift, crossfaded with the beat-stepped position. Mirroring
+      // alternate fixtures makes the step read as the rig opening and closing.
+      const driftPan = Math.sin(t * 0.6 + f.phase) * 0.3;
+      const steppedPan = bt.lastPan * (i % 2 === 0 ? 1 : -1) * 0.55;
+      const sweepPan = driftPan * (1 - beatStep) + steppedPan * beatStep;
       // Mesh pose: every fan fires up and out at the same steady angle with
       // alternating pans, so neighbouring fans cross into a lattice overhead.
-      const meshTilt = (f.fromTruss ? 0.85 : 0.7) + Math.sin(s.time * 0.12 * s.pace + f.phase) * 0.03;
-      const meshPan = f.meshPan + Math.sin(s.time * 0.1 * s.pace + f.phase) * 0.04;
+      const meshTilt = (f.fromTruss ? 0.85 : 0.7) + Math.sin(s.time * 0.12 * s.pace * tempoScale + f.phase) * 0.03;
+      // the lattice itself drifts with the tempo so a fast track never looks frozen
+      const meshPan = f.meshPan + Math.sin(s.time * 0.1 * s.pace * tempoScale + f.phase) * 0.04 * (1 + sens);
       // Audience pose: narrow bundles skimming just over the heads toward the viewer.
       // floor fans open toward the viewer and slowly sweep across eye level
       const aimTilt = (f.fromTruss ? 1.45 : 0.92) + Math.sin(s.time * 0.18 * s.pace + f.phase) * 0.08;
@@ -199,17 +293,27 @@ export function LaserRig() {
       const u = m.uniforms;
       u.uTime.value = s.time;
       u.uTreble.value = s.treble * 0.3 * sens;
-      u.uBeat.value = s.beatEnv * 0.4 * sens * (1 - wMesh * 0.7);
+      // the fast punch (not the slow envelope) is what makes the hit visible
+      u.uBeat.value = Math.max(s.beatEnv * 0.3, bt.punch * 0.9) * sens * (1 - wMesh * 0.5);
       u.uIntensity.value =
         fixtureWeight *
         s.settings.intensity *
         (1 - sens * 0.4 + sm.amp * 0.4 * sens) *
+        (1 + bt.punch * 0.55 * sens) *
         (1 + wMesh * 0.3 + wAim * 0.2 - wSheet * 0.5 + director.white * 0.4);
       u.uLines.value = Math.round(sweepLines * wSweep + 16 * wMesh + 9 * wAim + 40 * wSheet);
-      u.uSpread.value = 1.0 * wSweep + 0.9 * wMesh + 0.7 * wAim + 2.4 * wSheet;
+      // the fan opens a little wider on the beat and closes between hits
+      const beatSpread = 1 + bt.punch * 0.22 * sens;
+      u.uSpread.value = (1.0 * wSweep + 0.7 * wAim) * beatSpread + 0.9 * wMesh + 2.4 * wSheet;
       // sheets use very wide beams so the lines fuse into one solid plane
       u.uWidth.value = 0.045 + wSheet * 1.5 + director.white * 0.02;
-      u.uSweep.value = Math.sin(t * 0.8) * 0.35 * wSweep + Math.sin(s.time * 0.08 + f.phase) * 0.08 * (wMesh + wAim);
+      // uSweep rolls the fan about its own axis. With a tempo it rolls steadily,
+      // faster on quicker tracks and reversing per fixture so the rig counter-rotates.
+      const rollDir = i % 2 === 0 ? 1 : -1;
+      const roll = s.time * 0.22 * tempoScale * s.pace * sens * rollDir;
+      u.uSweep.value =
+        (Math.sin(t * 0.8) * 0.35 * (1 - sens) + Math.sin(roll) * 0.5 * sens) * wSweep +
+        Math.sin(s.time * 0.08 + f.phase) * 0.08 * (wMesh + wAim);
       // Real laser fans are one colour each: a fixed tint, the palette colour,
       // green alternating with it, or a different colour per fixture (rainbow).
       const col = laserColorFor(u.uColorA.value as THREE.Color, s.settings.laserColor, i, s.colorA, s.colorB);
