@@ -265,7 +265,7 @@ export const ledFragment = /* glsl */ `
       float c = clouds(p, t, uAmp);
       vec2 cell = floor(cc * uGrid);
       float tw = step(0.93, hash2(cell + floor(uTime * 6.0) * 0.53)) * step(0.3, c);
-      v = max(c * (0.6 + uBass * 0.4), tw);
+      v = max(c * (0.95 + uBass * 0.4), tw);
     } else {
       // Temple: outline of a stepped pyramid (silhouette minus its eroded self),
       // a glowing doorway and the rotating "cube of time" above the apex.
