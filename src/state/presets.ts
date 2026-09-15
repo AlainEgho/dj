@@ -31,6 +31,45 @@ export const CUES: { id: CueId; label: string }[] = [
   { id: 'full', label: 'Everything' },
 ];
 
+/**
+ * Laser colours. The fixed colours use the tints real diode lasers throw
+ * (532nm green, 638nm red, 445nm blue and so on) rather than flat RGB, so a
+ * green fan reads as a laser and not as a green light.
+ * 'palette'  follows the colour engine, 'mixed' alternates green with it,
+ * 'rainbow'  gives every fixture its own colour across the rig.
+ */
+export type LaserColorId =
+  | 'palette'
+  | 'mixed'
+  | 'rainbow'
+  | 'green'
+  | 'red'
+  | 'blue'
+  | 'cyan'
+  | 'magenta'
+  | 'yellow'
+  | 'orange'
+  | 'violet'
+  | 'white';
+
+export const LASER_COLORS: { id: LaserColorId; label: string; rgb: [number, number, number] | null }[] = [
+  { id: 'mixed', label: 'Green + palette', rgb: null },
+  { id: 'palette', label: 'Palette', rgb: null },
+  { id: 'rainbow', label: 'Rainbow', rgb: null },
+  { id: 'green', label: 'Green', rgb: [0.2, 1.0, 0.3] },
+  { id: 'red', label: 'Red', rgb: [1.0, 0.12, 0.1] },
+  { id: 'blue', label: 'Blue', rgb: [0.22, 0.35, 1.0] },
+  { id: 'cyan', label: 'Cyan', rgb: [0.2, 0.95, 1.0] },
+  { id: 'magenta', label: 'Magenta', rgb: [1.0, 0.15, 0.8] },
+  { id: 'yellow', label: 'Yellow', rgb: [1.0, 0.92, 0.25] },
+  { id: 'orange', label: 'Orange', rgb: [1.0, 0.5, 0.1] },
+  { id: 'violet', label: 'Violet', rgb: [0.62, 0.3, 1.0] },
+  { id: 'white', label: 'White', rgb: [1.0, 1.0, 1.0] },
+];
+
+/** The colours the rainbow mode cycles across fixtures. */
+export const RAINBOW_ORDER: LaserColorId[] = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'violet', 'magenta'];
+
 /** Music profiles. 'auto' is genre-neutral. */
 export type GenreId = 'auto' | 'trance' | 'techno' | 'house';
 export const GENRES: { id: GenreId; label: string; blurb: string }[] = [
@@ -78,7 +117,7 @@ export interface StageSettings {
   intensity: number;
   laserDensity: number; // 0..1 -> number of laser fixtures
   /** green = classic 532nm, palette = follow the colour engine, mixed = alternate */
-  laserColor: 'green' | 'palette' | 'mixed';
+  laserColor: LaserColorId;
   beamCount: number; // 4..24
   strobeEnabled: boolean;
   lasersEnabled: boolean;

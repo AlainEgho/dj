@@ -4,7 +4,7 @@ import { useFrame } from './fiber';
 import { laserFragment, laserVertex } from './shaders';
 import { director, stage } from './stageState';
 import { useSettings } from '../state/settingsStore';
-import type { RigStyle } from '../state/presets';
+import { LASER_COLORS, RAINBOW_ORDER, type RigStyle } from '../state/presets';
 
 const FAN_SIZE = 34;
 
@@ -38,12 +38,14 @@ function buildFixtures(density: number, style: RigStyle): Fixture[] {
     });
   }
   // Truss-mounted lasers (the original festival rig) fire down and out over
-  // the crowd. The arena style leaves them off for a cleaner picture.
-  const trussCount: number = style === 'arena' ? 0 : Math.round(1 + density * 3);
+  // the crowd. The arena style leaves them off for a cleaner picture. The row
+  // matches the floor row in size so a "top only" cue reads as a full row and
+  // "top centre" lights several fixtures rather than one.
+  const trussCount: number = style === 'arena' ? 0 : Math.round(3 + density * 5);
   for (let i = 0; i < trussCount; i++) {
     const t = trussCount === 1 ? 0.5 : i / (trussCount - 1);
     fixtures.push({
-      x: (t - 0.5) * 16 + 0.6,
+      x: (t - 0.5) * 18,
       y: 8.8,
       z: -2.0,
       fromTruss: true,
@@ -150,7 +152,8 @@ export function LaserRig() {
       if (!g) continue;
       // Which fixtures fire right now: top centre, whole top row, bottom centre,
       // whole bottom row, or everything; weights crossfade between groups.
-      const isMiddle = Math.abs(f.x) < 6;
+      // "centre" is the inner third of a row: a tight cluster, not most of it
+      const isMiddle = Math.abs(f.x) < 4.6;
       const rowWeight = f.fromTruss
         ? Math.max(director.gTop, isMiddle ? director.gTopMid : 0)
         : Math.max(director.gBottom, isMiddle ? director.gBotMid : 0);
@@ -158,14 +161,9 @@ export function LaserRig() {
       const fixtureWeight = weight * groupFactor;
       const visible = fixtureWeight > 0.01;
       g.visible = visible;
-      {
-        const mode = s.settings.laserColor;
-        const green = mode === 'green' || (mode === 'mixed' && i % 2 === 1);
-        emitterMats[i].color
-          .copy(green ? LASER_GREEN : i % 2 === 0 ? s.colorA : s.colorB)
-          .lerp(WHITE, 0.5)
-          .multiplyScalar(0.4 + weight * 0.8);
-      }
+      laserColorFor(emitterMats[i].color, s.settings.laserColor, i, s.colorA, s.colorB)
+        .lerp(WHITE, 0.5)
+        .multiplyScalar(0.4 + weight * 0.8);
       if (!visible) continue;
 
       const t = s.time * sweepSpeed * f.speed + f.phase;
@@ -206,13 +204,9 @@ export function LaserRig() {
       // sheets use very wide beams so the lines fuse into one solid plane
       u.uWidth.value = 0.045 + wSheet * 1.5 + director.white * 0.02;
       u.uSweep.value = Math.sin(t * 0.8) * 0.35 * wSweep + Math.sin(s.time * 0.08 + f.phase) * 0.08 * (wMesh + wAim);
-      // Real laser fans are one colour each. Classic rigs are 532nm green; the
-      // "mixed" setting alternates green with the palette colour per emitter.
-      const mode = s.settings.laserColor;
-      const useGreen = mode === 'green' || (mode === 'mixed' && i % 2 === 1);
-      const col = u.uColorA.value as THREE.Color;
-      if (useGreen) col.copy(LASER_GREEN);
-      else col.copy(i % 2 === 0 ? s.colorA : s.colorB);
+      // Real laser fans are one colour each: a fixed tint, the palette colour,
+      // green alternating with it, or a different colour per fixture (rainbow).
+      const col = laserColorFor(u.uColorA.value as THREE.Color, s.settings.laserColor, i, s.colorA, s.colorB);
       // white lasers right after a drop, fading back to colour
       if (director.white > 0) col.lerp(WHITE, director.white);
       (u.uColorB.value as THREE.Color).copy(col);
@@ -240,4 +234,21 @@ export function LaserRig() {
 }
 
 const WHITE = new THREE.Color(1, 1, 1);
-const LASER_GREEN = new THREE.Color(0.2, 1.0, 0.3);
+
+/** Fixed laser colours, looked up once, keyed by id. */
+const FIXED_COLORS = new Map<string, THREE.Color>(
+  LASER_COLORS.filter((c) => c.rgb).map((c) => [c.id, new THREE.Color(...(c.rgb as [number, number, number]))]),
+);
+const RAINBOW = RAINBOW_ORDER.map((id) => FIXED_COLORS.get(id) ?? WHITE);
+
+/**
+ * Colour for fixture `i`: a fixed laser tint, the palette colour, green
+ * alternating with the palette, or a different colour per fixture (rainbow).
+ */
+function laserColorFor(out: THREE.Color, mode: string, i: number, colorA: THREE.Color, colorB: THREE.Color): THREE.Color {
+  const fixed = FIXED_COLORS.get(mode);
+  if (fixed) return out.copy(fixed);
+  if (mode === 'rainbow') return out.copy(RAINBOW[i % RAINBOW.length]);
+  if (mode === 'mixed' && i % 2 === 1) return out.copy(FIXED_COLORS.get('green') ?? WHITE);
+  return out.copy(i % 2 === 0 ? colorA : colorB);
+}

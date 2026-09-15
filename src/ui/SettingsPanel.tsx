@@ -1,7 +1,16 @@
 import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PALETTES, hslToHex } from '../state/palettes';
-import { CUES, GENRES, RIG_STYLES, WALL_SHAPES, type ShowMode, type StageSettings, type WallMode } from '../state/presets';
+import {
+  CUES,
+  GENRES,
+  LASER_COLORS,
+  RIG_STYLES,
+  WALL_SHAPES,
+  type ShowMode,
+  type StageSettings,
+  type WallMode,
+} from '../state/presets';
 import { settingsStore, usePresets, useSettings } from '../state/settingsStore';
 import { Btn } from './ControlBar';
 import { Slider } from './Slider';
@@ -199,19 +208,21 @@ export function SettingsPanel() {
         <Slider label="Laser density" value={s.laserDensity} onChange={(v) => set({ laserDensity: v })} />
         <Text style={[styles.note, { marginBottom: 6 }]}>Laser colour</Text>
         <View style={styles.chips}>
-          {(
-            [
-              { id: 'mixed', label: 'Green + palette' },
-              { id: 'green', label: 'Green' },
-              { id: 'palette', label: 'Palette' },
-            ] as { id: StageSettings['laserColor']; label: string }[]
-          ).map((c) => (
+          {LASER_COLORS.map((c) => (
             <Pressable
               key={c.id}
               onPress={() => set({ laserColor: c.id })}
               style={[styles.paletteChip, s.laserColor === c.id && styles.chipActive]}
             >
-              <View style={[styles.swatch, { backgroundColor: c.id === 'palette' ? theme.accent : '#33ff4d' }]} />
+              {c.id === 'rainbow' ? (
+                <View style={styles.rainbowSwatch}>
+                  {['#ff1f1a', '#ffeb40', '#33ff4d', '#38b6ff', '#ff26cc'].map((h) => (
+                    <View key={h} style={{ flex: 1, backgroundColor: h }} />
+                  ))}
+                </View>
+              ) : (
+                <View style={[styles.swatch, { backgroundColor: c.rgb ? rgbToHex(c.rgb) : theme.accent }]} />
+              )}
               <Text style={styles.chipTitle}>{c.label}</Text>
             </Pressable>
           ))}
@@ -310,6 +321,9 @@ export function SettingsPanel() {
   );
 }
 
+const rgbToHex = ([r, g, b]: [number, number, number]) =>
+  `#${[r, g, b].map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255).toString(16).padStart(2, '0')).join('')}`;
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
@@ -354,6 +368,7 @@ const styles = StyleSheet.create({
   chipTitle: { color: theme.text, fontSize: 14, fontWeight: '600' },
   chipBlurb: { color: theme.textDim, fontSize: 11, marginTop: 2 },
   swatch: { width: 16, height: 16, borderRadius: 8 },
+  rainbowSwatch: { width: 16, height: 16, borderRadius: 8, overflow: 'hidden', flexDirection: 'row' },
   note: { color: theme.textDim, fontSize: 12 },
   toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
   toggleLabel: { color: theme.text, fontSize: 14 },

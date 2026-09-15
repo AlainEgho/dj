@@ -3,7 +3,7 @@
  * Every binding runs against the settings store or the show director and
  * returns a short label for the on-screen toast.
  */
-import { CUES, GENRES, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } from '../state/presets';
+import { CUES, GENRES, LASER_COLORS, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } from '../state/presets';
 import { PALETTES } from '../state/palettes';
 import { settingsStore } from '../state/settingsStore';
 import { triggerDrop } from '../stage/director';
@@ -34,13 +34,15 @@ const nudge = (k: 'intensity' | 'pacing' | 'reactivity' | 'sensitivity' | 'hueCy
   set({ [k]: v } as Partial<StageSettings>);
   return `${name} ${Math.round(v * 100)}%`;
 };
-const cycle = <T extends string>(k: keyof StageSettings, values: readonly T[], name: string, dir = 1) => () => {
-  const cur = get()[k] as T;
-  const i = values.indexOf(cur);
-  const next = values[(i + dir + values.length) % values.length];
-  set({ [k]: next } as Partial<StageSettings>);
-  return `${name}: ${next}`;
-};
+const cycle =
+  <T extends string>(k: keyof StageSettings, values: readonly T[], name: string, dir = 1, labels?: Record<string, string>) =>
+  () => {
+    const cur = get()[k] as T;
+    const i = values.indexOf(cur);
+    const next = values[(i + dir + values.length) % values.length];
+    set({ [k]: next } as Partial<StageSettings>);
+    return `${name}: ${labels?.[next] ?? next}`;
+  };
 
 const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '='];
 const cueBindings: KeyBinding[] = CUES.map((c, i) => ({
@@ -53,7 +55,8 @@ const cueBindings: KeyBinding[] = CUES.map((c, i) => ({
   },
 }));
 
-const LASER_COLORS = ['mixed', 'green', 'palette'] as const;
+const LASER_COLOR_IDS = LASER_COLORS.map((c) => c.id);
+const LASER_COLOR_LABELS = Object.fromEntries(LASER_COLORS.map((c) => [c.id, c.label]));
 const SHOW_MODES = ['chill', 'festival', 'rave'] as const;
 
 /**
@@ -139,7 +142,14 @@ export const KEYMAP: KeyBinding[] = [
   { key: ',', label: 'Previous palette', group: 'Colour', run: cycle('paletteId', PALETTES_ORDER, 'Palette', -1) },
   { key: '.', label: 'Next palette', group: 'Colour', run: cycle('paletteId', PALETTES_ORDER, 'Palette', 1) },
   { key: 'a', label: 'Auto palette', group: 'Colour', run: () => (set({ paletteId: 'auto' }), 'Palette: auto') },
-  { key: 'y', label: 'Cycle laser colour', group: 'Colour', run: cycle('laserColor', LASER_COLORS, 'Laser colour') },
+  { key: 'y', label: 'Next laser colour', group: 'Colour', run: cycle('laserColor', LASER_COLOR_IDS, 'Lasers', 1, LASER_COLOR_LABELS) },
+  {
+    key: 'Y',
+    shift: true,
+    label: 'Previous laser colour',
+    group: 'Colour',
+    run: cycle('laserColor', LASER_COLOR_IDS, 'Lasers', -1, LASER_COLOR_LABELS),
+  },
   // Shift + a number jumps straight to a palette
   ...PALETTE_KEYS,
   {
