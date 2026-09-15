@@ -90,7 +90,10 @@ export function BeamArray() {
     const weight = s.settings.beamsEnabled ? director.beams * (1 - director.blackout) : 0;
     const enabled = weight > 0.01;
     const aim = director.beamAim;
-    const speed = s.pace * (0.2 + s.mid * 0.4);
+    // Beam sensitivity: the user's setting scaled by the director's reactivity,
+    // which collapses during speech so the heads keep a steady sweep.
+    const sens = s.settings.beamSensitivity * director.react;
+    const speed = s.pace * (0.2 + s.mid * 0.4 * sens);
     const { euler, qSweep, qAim, headPos, target, dir } = scratch;
 
     for (let i = 0; i < heads.length; i++) {
@@ -126,7 +129,8 @@ export function BeamArray() {
 
       const u = m.uniforms;
       u.uTime.value = s.time;
-      u.uIntensity.value = weight * s.intensity * (0.45 + s.amp * 0.7) * (0.9 + s.beatEnv * 0.25) * (1 - aim * 0.5);
+      u.uIntensity.value =
+        weight * s.intensity * (1 - sens * 0.55 + s.amp * 0.7 * sens) * (1 + s.beatEnv * 0.25 * sens - 0.1) * (1 - aim * 0.5);
       (u.uColor.value as THREE.Color).copy(i % 3 === 0 ? s.colorB : i % 3 === 1 ? s.colorA : s.colorC);
       const lens = lensMaterials[i];
       lens.color.copy(u.uColor.value as THREE.Color).lerp(WHITE, 0.1 + s.beatEnv * 0.3 + aim * 0.5).multiplyScalar(0.5 + weight * 0.5);

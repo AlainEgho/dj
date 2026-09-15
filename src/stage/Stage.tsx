@@ -7,6 +7,7 @@ import { useRegisterRenderLoop } from '../audio/useAudioAnalyzer';
 import { LaserRig } from './LaserRig';
 import { BeamArray } from './BeamArray';
 import { StrobeWall } from './StrobeWall';
+import { WhiteWash } from './WhiteWash';
 import { PyroBurst } from './PyroBurst';
 import { LEDBackdrop } from './LEDBackdrop';
 import { Haze } from './Haze';
@@ -86,6 +87,7 @@ export function Stage() {
         <BeamArray />
         <LaserRig />
         <StrobeWall />
+        <WhiteWash />
         <PyroBurst />
       </Canvas>
     </View>

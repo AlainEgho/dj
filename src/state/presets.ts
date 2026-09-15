@@ -14,6 +14,7 @@ export type CueId =
   | 'meshBlackout'
   | 'festival'
   | 'lasersBeams'
+  | 'whiteOut'
   | 'full';
 
 export const CUES: { id: CueId; label: string }[] = [
@@ -28,6 +29,7 @@ export const CUES: { id: CueId; label: string }[] = [
   { id: 'meshBlackout', label: 'Mesh blackout' },
   { id: 'festival', label: 'Festival mix' },
   { id: 'lasersBeams', label: 'Lasers + beams' },
+  { id: 'whiteOut', label: 'White out' },
   { id: 'full', label: 'Everything' },
 ];
 
@@ -120,6 +122,10 @@ export interface StageSettings {
   laserColor: LaserColorId;
   beamCount: number; // 4..24
   strobeEnabled: boolean;
+  /** white wash: floods the stage in bright white light */
+  washEnabled: boolean;
+  /** momentary wash bump, held from the keyboard */
+  washBump: boolean;
   lasersEnabled: boolean;
   beamsEnabled: boolean;
   pyroEnabled: boolean;
@@ -129,6 +135,12 @@ export interface StageSettings {
   reactivity: number;
   /** 0..1 input sensitivity: gain floor and beat-detection threshold */
   sensitivity: number;
+  /** 0..1 how much the lasers react to the audio (0 = steady, ignores the track) */
+  laserSensitivity: number;
+  /** 0..1 how much the moving heads react to the audio */
+  beamSensitivity: number;
+  /** 0..1 how readily the strobes and blinders fire (0 = never on their own) */
+  strobeSensitivity: number;
   /** 0 = slow cinematic, 1 = fast club pacing */
   pacing: number;
   /** let the show director change looks on musical phrases */
@@ -161,6 +173,8 @@ export const DEFAULT_SETTINGS: StageSettings = {
   laserColor: 'mixed',
   beamCount: 12,
   strobeEnabled: true,
+  washEnabled: true,
+  washBump: false,
   lasersEnabled: true,
   beamsEnabled: true,
   pyroEnabled: true,
@@ -168,6 +182,9 @@ export const DEFAULT_SETTINGS: StageSettings = {
   hazeEnabled: true,
   reactivity: 0.7,
   sensitivity: 0.5,
+  laserSensitivity: 0.5,
+  beamSensitivity: 0.6,
+  strobeSensitivity: 0.5,
   pacing: 0.25,
   autoCues: true,
   cue: 'auto',

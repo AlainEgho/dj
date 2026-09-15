@@ -19,6 +19,12 @@ export interface AudioFrame {
   bpmConfidence: number;
   /** phase 0..1 within the current beat, derived from bpm + last beat time */
   beatPhase: number;
+  /**
+   * 0..1 confidence that this is beat-driven music rather than speech, applause
+   * or room noise. Low when the pulse is weak or the energy is mid-heavy with
+   * little bass, which is what talking looks like.
+   */
+  groove: number;
   /** raw normalized spectrum (0..1 per bin), downsampled */
   spectrum: Float32Array;
   /** ms timestamp of the frame */

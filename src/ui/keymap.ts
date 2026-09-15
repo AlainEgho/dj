@@ -81,6 +81,7 @@ export const KEYMAP: KeyBinding[] = [
   { key: 'l', label: 'Lasers on/off', group: 'Elements', run: toggle('lasersEnabled', 'Lasers') },
   { key: 'b', label: 'Moving heads on/off', group: 'Elements', run: toggle('beamsEnabled', 'Beams') },
   { key: 's', label: 'Strobes on/off', group: 'Elements', run: toggle('strobeEnabled', 'Strobes') },
+  { key: 'S', shift: true, label: 'White wash on/off', group: 'Elements', run: toggle('washEnabled', 'White wash') },
   { key: 'p', label: 'Pyro on/off', group: 'Elements', run: toggle('pyroEnabled', 'Pyro') },
   { key: 'w', label: 'LED wall on/off', group: 'Elements', run: toggle('ledEnabled', 'Wall') },
   { key: 'h', label: 'Haze on/off', group: 'Elements', run: toggle('hazeEnabled', 'Haze') },
@@ -115,7 +116,18 @@ export const KEYMAP: KeyBinding[] = [
   { key: 'u', label: 'Wall: auto', group: 'Wall', run: () => (set({ wallMode: 'auto' }), 'Wall: auto') },
   { key: 'i', label: 'Wall: spectrum', group: 'Wall', run: () => (set({ wallMode: 'spectrum' }), 'Wall: spectrum') },
   { key: 'o', label: 'Wall: heat map', group: 'Wall', run: () => (set({ wallMode: 'heatmap' }), 'Wall: heat map') },
-  { key: 'k', label: 'Wall: shapes', group: 'Wall', run: () => (set({ wallMode: 'shapes' }), 'Wall: shapes') },
+  {
+    key: 'k',
+    label: 'Wall: shapes (each press picks the next shape)',
+    group: 'Wall',
+    run: () => {
+      // first press switches to shapes, every press after that advances
+      const cur = get();
+      const n = cur.wallMode === 'shapes' ? (cur.wallShape + 1) % WALL_SHAPE_COUNT : cur.wallShape;
+      set({ wallMode: 'shapes', wallShape: n });
+      return `Shape: ${WALL_SHAPES[n]?.name ?? n}`;
+    },
+  },
   { key: 't', label: 'Wall: text', group: 'Wall', run: () => (set({ wallMode: 'text' }), 'Wall: text') },
   { key: 'e', label: 'Wall off', group: 'Wall', run: () => (set({ wallMode: 'off' }), 'Wall: off') },
   {
@@ -201,6 +213,28 @@ export const KEYMAP: KeyBinding[] = [
     run: (down) => {
       set({ blackout: down });
       return down ? 'BLACKOUT' : 'Lights up';
+    },
+  },
+  {
+    key: 'Enter',
+    shift: true,
+    label: 'White out cue (hold the stage in bright white)',
+    group: 'Live',
+    run: () => {
+      const on = get().cue === 'whiteOut';
+      set({ cue: on ? 'auto' : 'whiteOut' });
+      return on ? 'Cue: Auto' : 'WHITE OUT';
+    },
+  },
+  {
+    key: 'w',
+    shift: true,
+    label: 'Hold for a white bump (momentary flood)',
+    group: 'Live',
+    hold: true,
+    run: (down) => {
+      set({ washBump: down });
+      return down ? 'WHITE' : '';
     },
   },
   { key: 'q', label: 'Record / stop recording (video + sound)', group: 'Live', run: () => toggleRecording() },

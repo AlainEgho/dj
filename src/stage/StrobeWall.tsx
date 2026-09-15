@@ -47,8 +47,11 @@ export function StrobeWall() {
     const s = stage;
     const f = flash.current;
     // Only fire when the director's look allows strobes; strength follows the cue weight.
-    const allow = s.settings.strobeEnabled ? director.strobe * (1 - director.blackout) : 0;
-    const build = s.settings.strobeEnabled ? director.build * (1 - director.blackout) : 0;
+    // Strobe sensitivity scaled by the director's reactivity, so a voice over
+    // the PA never sets the blinders off.
+    const sens = s.settings.strobeSensitivity * director.react;
+    const allow = s.settings.strobeEnabled ? director.strobe * (1 - director.blackout) * sens : 0;
+    const build = s.settings.strobeEnabled ? director.build * (1 - director.blackout) * sens : 0;
     const decay = Math.pow(0.5, s.dt / 0.07); // 70ms half-life
 
     // The drop: every blinder to full, white
@@ -58,7 +61,8 @@ export function StrobeWall() {
 
     if (allow > 0.05) {
       // full-wall hit on strong bass beats (needs a strong hit at calm pacing)
-      const threshold = 0.85 - s.pace * 0.3;
+      // a low sensitivity needs a much harder hit before the wall fires
+      const threshold = 1.05 - s.pace * 0.2 - sens * 0.35;
       if (s.beat && s.bass > threshold) {
         for (let i = 0; i < PANELS; i++) f[i] = allow;
       }

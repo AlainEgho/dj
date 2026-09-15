@@ -37,6 +37,7 @@ const TOGGLES: { key: keyof StageSettings; label: string }[] = [
   { key: 'lasersEnabled', label: 'Lasers' },
   { key: 'beamsEnabled', label: 'Moving heads' },
   { key: 'strobeEnabled', label: 'Strobes' },
+  { key: 'washEnabled', label: 'White wash' },
   { key: 'pyroEnabled', label: 'Pyro' },
   { key: 'ledEnabled', label: 'LED wall' },
   { key: 'hazeEnabled', label: 'Haze' },
@@ -205,6 +206,28 @@ export function SettingsPanel() {
           format={(v) => (v < 0.33 ? 'Low (loud rooms)' : v < 0.66 ? 'Normal' : 'High (quiet source)')}
         />
         <Slider label="Audio reactivity" value={s.reactivity} onChange={(v) => set({ reactivity: v })} />
+        <Slider
+          label="Laser sensitivity"
+          value={s.laserSensitivity}
+          onChange={(v) => set({ laserSensitivity: v })}
+          format={(v) => (v < 0.15 ? 'Steady (ignores audio)' : v < 0.5 ? 'Gentle' : v < 0.8 ? 'Normal' : 'Punchy')}
+        />
+        <Slider
+          label="Beam sensitivity"
+          value={s.beamSensitivity}
+          onChange={(v) => set({ beamSensitivity: v })}
+          format={(v) => (v < 0.15 ? 'Steady (ignores audio)' : v < 0.5 ? 'Gentle' : v < 0.8 ? 'Normal' : 'Punchy')}
+        />
+        <Slider
+          label="Strobe sensitivity"
+          value={s.strobeSensitivity}
+          onChange={(v) => set({ strobeSensitivity: v })}
+          format={(v) => (v < 0.15 ? 'Off unless cued' : v < 0.5 ? 'Rare' : v < 0.8 ? 'Normal' : 'Eager')}
+        />
+        <Text style={[styles.note, { marginBottom: 8 }]}>
+          How hard each family follows the track. During speech or any beatless passage both ease off on their own and the
+          heads open to the crowd.
+        </Text>
         <Slider label="Laser density" value={s.laserDensity} onChange={(v) => set({ laserDensity: v })} />
         <Text style={[styles.note, { marginBottom: 6 }]}>Laser colour</Text>
         <View style={styles.chips}>

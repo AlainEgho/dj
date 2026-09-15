@@ -55,6 +55,8 @@ const PROFILES: Record<GenreId, GenreProfile> = {
 
 export const profileFor = (g: GenreId): GenreProfile => PROFILES[g] ?? PROFILES.auto;
 
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
 export type Look =
   | 'wall'
   | 'wallBeams'
@@ -66,6 +68,7 @@ export type Look =
   | 'meshBlackout'
   | 'festival'
   | 'lasersBeams'
+  | 'whiteOut'
   | 'full';
 export type WallContent = 'spectrum' | 'heatmap' | 'shapes' | 'text';
 
@@ -82,6 +85,8 @@ interface Targets {
   beamAim: number;
   /** 1 = laser fans lie flat and shoot over the crowd toward the viewer */
   laserAim: number;
+  /** 0..1 white wash flooding the stage */
+  wash: number;
 }
 
 /**
@@ -114,6 +119,12 @@ export interface DirectorState extends Targets {
   build: number;
   /** true while the track is in a breakdown (quiet, no kick) */
   breakdown: boolean;
+  /**
+   * 0..1 how much the rig should react to the audio. Falls to ~0 during speech
+   * or any beatless passage, where the lasers hold still and the beams open to
+   * the crowd instead of chasing the voice.
+   */
+  react: number;
   /** 0..1 white-laser override, high right after a drop */
   white: number;
   /** 1 during the pre-drop blackout beat */
@@ -144,7 +155,8 @@ const T = (
   pyro: number,
   beamAim: number,
   laserAim: number,
-): Targets => ({ wall, lasers, mesh, sheet, beams, strobe, pyro, beamAim, laserAim });
+  wash = 0,
+): Targets => ({ wall, lasers, mesh, sheet, beams, strobe, pyro, beamAim, laserAim, wash });
 
 const TARGETS: Record<Look, Targets> = {
   wall: T(1, 0, 0, 0, 0.3, 0, 0, 0, 0),
@@ -158,7 +170,9 @@ const TARGETS: Record<Look, Targets> = {
   // the original festival rig: wall, beams and lasers running together at moderate levels
   festival: T(0.85, 0.65, 0, 0, 0.8, 0.4, 0.3, 0, 0),
   lasersBeams: T(0.4, 1, 0, 0, 0.6, 0.3, 0, 0, 0),
-  full: T(1, 1, 0, 0, 1, 1, 1, 0.4, 0.6),
+  // white out: the whole rig floods white, everything else steps back
+  whiteOut: T(0.15, 0, 0, 0, 0.5, 0.3, 0, 0, 0, 1),
+  full: T(1, 1, 0, 0, 1, 1, 1, 0.4, 0.6, 0.35),
 };
 
 // Arena vocabulary: exclusive looks (Transmission style)
@@ -197,6 +211,7 @@ export const director: DirectorState = {
   look: 'wallBeams',
   ...TARGETS.wallBeams,
   laserGroup: 'all',
+  wash: 0,
   autoPalette: 'tomorrow',
   gTopMid: 0,
   gTop: 0,
@@ -209,6 +224,7 @@ export const director: DirectorState = {
   energy: 0,
   build: 0,
   breakdown: false,
+  react: 1,
   white: 0,
   blackout: 0,
   cueTime: 0,
@@ -311,7 +327,7 @@ export function triggerDrop() {
 }
 
 export function updateDirector(
-  audio: { amp: number; bass: number; beat: boolean; bpm: number; bpmConfidence?: number },
+  audio: { amp: number; bass: number; beat: boolean; bpm: number; bpmConfidence?: number; groove?: number },
   settings: StageSettings,
   dt: number,
 ) {
@@ -326,6 +342,13 @@ export function updateDirector(
   energyFast += (audio.amp - energyFast) * Math.min(1, dt / 0.8);
   const rising = Math.max(0, energyFast - director.energy);
   const profile = profileFor(settings.genre);
+  // Speech / beatless audio: groove collapses, so the rig stops chasing the
+  // signal. Reactivity eases to near zero over ~1.5s and back over ~2.5s.
+  const grooveNow = audio.groove ?? 1;
+  const reactTarget = 0.12 + clamp01((grooveNow - 0.18) / 0.4) * 0.88;
+  director.react += (reactTarget - director.react) * Math.min(1, dt / (reactTarget < director.react ? 1.5 : 2.5));
+  const speech = director.react < 0.45;
+
   const buildTarget = Math.min(1, rising * profile.buildGain) * (director.energy < 0.75 ? 1 : 0.3);
   director.build += (buildTarget - director.build) * Math.min(1, dt / (buildTarget > director.build ? 0.6 : 2.5));
 
@@ -396,6 +419,13 @@ export function updateDirector(
       return;
     }
 
+    // No beat to work with (a speech break, an intro, a quiet interlude):
+    // hold a beams-to-crowd look instead of cutting laser cues to a voice.
+    if (speech) {
+      if (director.look !== 'beamsAudience') startCue('beamsAudience', settings);
+      target = TARGETS.beamsAudience;
+    }
+
     if (audio.beat) beatsInPhrase++;
     // Slow pacing = longer phrases (32 beats), fast = 16. Fall back to a timer
     // when no tempo is available. The post-drop "full" look lasts one phrase.
@@ -413,7 +443,7 @@ export function updateDirector(
     const maxSeconds = (beatMs * phraseBeats * 1.6) / 1000;
     const minSeconds = haveTempo ? 4 : 8 + (1 - settings.pacing) * 12;
     const phraseDone = beatsInPhrase >= phraseBeats || time - phraseStart > maxSeconds;
-    if (phraseDone && time - phraseStart > minSeconds) {
+    if (!speech && phraseDone && time - phraseStart > minSeconds) {
       // A laser phrase is followed by the mesh half of the time, so the fans
       // visibly fold into the lattice (the lasers -> mesh transition).
       const prev = director.look;
@@ -469,4 +499,8 @@ export function updateDirector(
   director.pyro += (target.pyro - director.pyro) * rate;
   director.beamAim += (target.beamAim - director.beamAim) * rate;
   director.laserAim += (target.laserAim - director.laserAim) * rate;
+  // The wash snaps up fast (a bump should feel instant) and falls away slowly.
+  const washTarget = settings.washEnabled ? Math.max(target.wash, settings.washBump ? 1 : 0) : 0;
+  const washRate = washTarget > director.wash ? Math.min(1, dt / 0.08) : Math.min(1, dt / 0.55);
+  director.wash += (washTarget - director.wash) * washRate;
 }

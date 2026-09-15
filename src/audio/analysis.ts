@@ -59,6 +59,8 @@ export class FeatureExtractor {
 
   private smoothAmp = 0;
   private ampGain = 1;
+  /** 0..1 how much this reads as beat-driven music rather than speech */
+  private groove = 0;
   private bandGain = { bass: 1, mid: 1, treble: 1 };
   private smoothBands = { bass: 0, mid: 0, treble: 0 };
 
@@ -212,6 +214,24 @@ export class FeatureExtractor {
       beatPhase = ((now - this.lastBeatTime) % period) / period;
     }
 
+    // ---- groove: music or talking? ---------------------------------------
+    // Music has a steady pulse and real low end. Speech is mid-dominated with
+    // little sustained bass and no stable tempo, so both terms collapse and the
+    // lasers can be told to stop reacting.
+    // Pulse: is there a steady tempo AND are beats still arriving on it?
+    const timeSinceBeat = now - this.lastBeatTime;
+    const expected = this.bpm > 0 ? 60000 / this.bpm : 600;
+    const onTime = clamp01(1 - (timeSinceBeat - expected * 1.5) / (expected * 2));
+    const pulse = clamp01(this.bpmConfidence * 1.4) * onTime;
+    // Body: music carries sustained low end, speech is mid-dominated.
+    const lowRatio = clamp01(rawBass / Math.max(0.02, rawBass + rawMid * 0.9));
+    const body = clamp01((lowRatio - 0.2) / 0.28);
+    // Both terms must hold up: a voice can be rhythmic, but it has no low end,
+    // and a bass drone has no pulse. Multiplying collapses either case.
+    const grooveNow = clamp01(Math.pow(pulse, 0.7) * Math.pow(body, 0.7));
+    // asymmetric smoothing: drop out of "music" quickly, come back gradually
+    this.groove += (grooveNow - this.groove) * (grooveNow < this.groove ? 0.06 : 0.02);
+
     // ---- downsampled spectrum --------------------------------------------
     const out = this.spectrumOut;
     const ratio = this.binCount / out.length;
@@ -235,6 +255,7 @@ export class FeatureExtractor {
       bpm: this.bpm,
       bpmConfidence: this.bpmConfidence,
       beatPhase,
+      groove: this.groove,
       spectrum: out,
       time: now,
     };
@@ -312,6 +333,7 @@ export class FeatureExtractor {
     this.bpmConfidence = 0;
     this.beatEnvelope = 0;
     this.smoothAmp = 0;
+    this.groove = 0;
     this.spectrumOut.fill(0);
   }
 }
@@ -328,6 +350,7 @@ export function emptyFrame(spectrumBins: number): AudioFrame {
     bpm: 0,
     bpmConfidence: 0,
     beatPhase: 0,
+    groove: 0,
     spectrum: new Float32Array(spectrumBins),
     time: 0,
   };
