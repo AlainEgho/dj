@@ -78,6 +78,12 @@ export function ControlBar() {
         {fullscreen.supported ? (
           <Btn label={fullscreen.active ? 'Exit fullscreen' : 'Fullscreen'} active={fullscreen.active} onPress={fullscreen.toggle} />
         ) : null}
+        {Platform.OS === 'web' ? (
+          <Btn
+            label="Keys ?"
+            onPress={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true }))}
+          />
+        ) : null}
         <Btn label="Projection" tone="accent" onPress={() => router.push('/projection')} />
       </View>
       {state.source === 'none' ? (

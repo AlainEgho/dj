@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PALETTES, hslToHex } from '../state/palettes';
 import { CUES, RIG_STYLES, WALL_SHAPES, type ShowMode, type StageSettings, type WallMode } from '../state/presets';
 import { settingsStore, usePresets, useSettings } from '../state/settingsStore';
 import { Btn } from './ControlBar';
 import { Slider } from './Slider';
 import { theme } from './theme';
+import { KEYMAP, describeKey } from './keymap';
 
 const MODES: { id: ShowMode; label: string; blurb: string }[] = [
   { id: 'chill', label: 'Chill', blurb: 'Slow sweeps, no strobes' },
@@ -212,6 +213,25 @@ export function SettingsPanel() {
         ))}
       </Section>
 
+      {Platform.OS === 'web' ? (
+        <Section title="Keyboard">
+          <Text style={[styles.note, { marginBottom: 8 }]}>
+            Every function has a key. Press ? on the stage for the overlay. Keys are ignored while typing here.
+          </Text>
+          {Array.from(new Set(KEYMAP.map((b) => b.group))).map((g) => (
+            <View key={g} style={{ marginBottom: 8 }}>
+              <Text style={[styles.note, { color: theme.accent, fontWeight: '700', marginBottom: 4 }]}>{g}</Text>
+              {KEYMAP.filter((b) => b.group === g).map((b) => (
+                <View key={`${g}-${describeKey(b)}`} style={styles.keyRow}>
+                  <Text style={styles.keyCap}>{describeKey(b)}</Text>
+                  <Text style={styles.note}>{b.label}</Text>
+                </View>
+              ))}
+            </View>
+          ))}
+        </Section>
+      ) : null}
+
       <Section title="Presets">
         <View style={styles.presetSave}>
           <TextInput
@@ -309,5 +329,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   presetRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  keyRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 2 },
+  keyCap: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: '700',
+    minWidth: 96,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
   presetName: { color: theme.text, fontSize: 14, fontWeight: '600' },
 });

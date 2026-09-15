@@ -50,6 +50,8 @@ class SettingsStore {
     try {
       const [s, p] = await Promise.all([AsyncStorage.getItem(SETTINGS_KEY), AsyncStorage.getItem(PRESETS_KEY)]);
       const settings = s ? { ...DEFAULT_SETTINGS, ...(JSON.parse(s) as Partial<StageSettings>) } : DEFAULT_SETTINGS;
+      // a held blackout must never survive a reload
+      settings.blackout = false;
       const presets = p ? (JSON.parse(p) as SavedPreset[]) : [];
       this.set({ settings, presets, hydrated: true });
     } catch {

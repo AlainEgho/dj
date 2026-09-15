@@ -87,6 +87,10 @@ export interface StageSettings {
   cue: CueId;
   /** which fixture set and look vocabulary the show uses */
   rigStyle: RigStyle;
+  /** operator override for which laser fixtures fire, or 'auto' */
+  laserGroup: 'auto' | 'topMiddle' | 'top' | 'bottomMiddle' | 'bottom' | 'all';
+  /** manual blackout (held from the keyboard) */
+  blackout: boolean;
   /** LED wall content */
   wallMode: WallMode;
   wallShape: number;
@@ -114,6 +118,8 @@ export const DEFAULT_SETTINGS: StageSettings = {
   autoCues: true,
   cue: 'auto',
   rigStyle: 'mix',
+  laserGroup: 'auto',
+  blackout: false,
   wallMode: 'auto',
   wallShape: 0,
   wallText: '',

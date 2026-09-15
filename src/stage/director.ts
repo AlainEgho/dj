@@ -240,6 +240,16 @@ function snapTo(t: Targets) {
   director.laserAim = t.laserAim;
 }
 
+/** Operator-triggered drop: blackout beat, then everything with white lasers and pyro. */
+export function triggerDrop() {
+  if (pendingDrop) return;
+  pendingDrop = true;
+  blackoutUntil = time + BLACKOUT_SECONDS;
+  director.blackout = 1;
+  director.sinceDrop = 0;
+  quietTime = 0;
+}
+
 export function updateDirector(
   audio: { amp: number; bass: number; beat: boolean; bpm: number },
   settings: StageSettings,
@@ -257,6 +267,13 @@ export function updateDirector(
   const rising = Math.max(0, energyFast - director.energy);
   const buildTarget = Math.min(1, rising * 3) * (director.energy < 0.75 ? 1 : 0.3);
   director.build += (buildTarget - director.build) * Math.min(1, dt / (buildTarget > director.build ? 0.6 : 2.5));
+
+  // Manual blackout held from the keyboard: everything dark until released.
+  if (settings.blackout) {
+    director.blackout = 1;
+    return;
+  }
+  if (!pendingDrop && blackoutUntil < 0) director.blackout = 0;
 
   // Pre-drop blackout: hold everything dark for a beat, then explode.
   if (blackoutUntil > 0) {
@@ -327,7 +344,9 @@ export function updateDirector(
   // Laser groups change every 8 beats (or ~6-10s without a tempo), independent
   // of the look, so the source of the beams keeps moving with the music. A big
   // surge at high energy opens every fixture at once.
-  if (settings.cue === 'auto' && settings.autoCues) {
+  if (settings.laserGroup !== 'auto') {
+    director.laserGroup = settings.laserGroup; // operator override from the keyboard
+  } else if (settings.cue === 'auto' && settings.autoCues) {
     if (audio.beat) groupBeats++;
     const groupSeconds = 6 + (1 - settings.pacing) * 4;
     if (groupBeats >= 8 || time - groupStart > groupSeconds) {
