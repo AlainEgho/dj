@@ -38,9 +38,23 @@ function set(partial: Partial<RecorderState>) {
   listeners.forEach((l) => l());
 }
 
-function pickMime(): string {
-  const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-  return candidates.find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
+/**
+ * Prefer MP4 with H.264 + AAC (plays everywhere, phones included); fall back
+ * to WebM where the browser cannot mux MP4 (Firefox).
+ */
+function pickMime(): { mime: string; ext: string } {
+  const candidates: [string, string][] = [
+    ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'mp4'], // H.264 High 4.0 + AAC
+    ['video/mp4;codecs=avc1.4D4028,mp4a.40.2', 'mp4'], // H.264 Main 4.0 + AAC
+    ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'mp4'], // H.264 Baseline + AAC
+    ['video/mp4;codecs=avc1,opus', 'mp4'],
+    ['video/mp4', 'mp4'],
+    ['video/webm;codecs=vp9,opus', 'webm'],
+    ['video/webm;codecs=vp8,opus', 'webm'],
+    ['video/webm', 'webm'],
+  ];
+  const found = candidates.find(([m]) => MediaRecorder.isTypeSupported(m));
+  return found ? { mime: found[0], ext: found[1] } : { mime: '', ext: 'webm' };
 }
 
 function stamp() {
@@ -65,15 +79,15 @@ export function startRecording(): string {
     const audio = getRecordingAudioStream();
     const tracks = [...canvasStream.getVideoTracks(), ...(audio ? audio.getAudioTracks() : [])];
     const mixed = new MediaStream(tracks);
-    const mimeType = pickMime();
-    recorder = new MediaRecorder(mixed, mimeType ? { mimeType, videoBitsPerSecond: 12_000_000 } : undefined);
+    const { mime, ext } = pickMime();
+    recorder = new MediaRecorder(mixed, mime ? { mimeType: mime, videoBitsPerSecond: 12_000_000, audioBitsPerSecond: 192_000 } : undefined);
     chunks = [];
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
     };
     recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: recorder?.mimeType || 'video/webm' });
-      const name = `stage-${stamp()}.webm`;
+      const blob = new Blob(chunks, { type: recorder?.mimeType || (ext === 'mp4' ? 'video/mp4' : 'video/webm') });
+      const name = `stage-${stamp()}.${ext}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -94,7 +108,7 @@ export function startRecording(): string {
     if (timer) clearInterval(timer);
     timer = setInterval(() => set({ seconds: Math.floor((Date.now() - startedAt) / 1000) }), 500);
     set({ recording: true, seconds: 0, error: null });
-    return audio ? 'Recording with sound' : 'Recording (no audio source yet)';
+    return audio ? `Recording ${ext.toUpperCase()} with sound` : `Recording ${ext.toUpperCase()} (no audio source yet)`;
   } catch (e) {
     set({ error: e instanceof Error ? e.message : String(e) });
     return 'Recording failed';
