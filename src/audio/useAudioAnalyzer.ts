@@ -109,6 +109,9 @@ class AudioAnalyzer {
   }
 
   // ---- controls ----------------------------------------------------------
+  /** Audio for screen recording (null where unsupported). */
+  getRecordingStream = (): MediaStream | null => this.engine.getRecordingAudioStream?.() ?? null;
+
   private sensitivity = -1;
   setSensitivity = (v: number) => {
     if (v === this.sensitivity) return;
@@ -179,6 +182,9 @@ export const getAudioFrame = (): AudioFrame => getAnalyzer().getFrame();
 
 /** 0..1 input sensitivity (beat threshold + gain floor). Cheap to call every frame. */
 export const setAudioSensitivity = (v: number) => getAnalyzer().setSensitivity(v);
+
+/** MediaStream of the audio driving the show, for screen recording (web). */
+export const getRecordingAudioStream = (): MediaStream | null => getAnalyzer().getRecordingStream();
 
 export function useAudioAnalyzer(): { state: AudioAnalyzerState; controls: AudioAnalyzerControls } {
   const analyzer = getAnalyzer();

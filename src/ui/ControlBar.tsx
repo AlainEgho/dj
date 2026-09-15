@@ -4,6 +4,7 @@ import { useAudioAnalyzer } from '../audio/useAudioAnalyzer';
 import { Slider } from './Slider';
 import { theme } from './theme';
 import { useFullscreen } from './useFullscreen';
+import { toggleRecording, useRecorder } from './recorder';
 
 function fmtTime(s: number) {
   if (!isFinite(s)) return '0:00';
@@ -45,11 +46,14 @@ export function ControlBar() {
   const { state, controls } = useAudioAnalyzer();
   const router = useRouter();
   const fullscreen = useFullscreen();
+  const rec = useRecorder();
   const isFile = state.source === 'file';
 
   return (
     <View style={styles.wrap}>
       {state.error ? <Text style={styles.error}>{state.error}</Text> : null}
+      {rec.error ? <Text style={styles.error}>{rec.error}</Text> : null}
+      {!rec.recording && rec.lastFileName ? <Text style={styles.hint}>Saved {rec.lastFileName} to your downloads.</Text> : null}
       {isFile && state.duration > 0 ? (
         <View style={styles.seekRow}>
           <Slider
@@ -77,6 +81,14 @@ export function ControlBar() {
         <Btn label="Settings" onPress={() => router.push('/settings')} />
         {fullscreen.supported ? (
           <Btn label={fullscreen.active ? 'Exit fullscreen' : 'Fullscreen'} active={fullscreen.active} onPress={fullscreen.toggle} />
+        ) : null}
+        {rec.supported ? (
+          <Btn
+            label={rec.recording ? `■ Stop ${fmtTime(rec.seconds)}` : '● Record'}
+            tone={rec.recording ? 'danger' : 'default'}
+            active={rec.recording}
+            onPress={() => toggleRecording()}
+          />
         ) : null}
         {Platform.OS === 'web' ? (
           <Btn

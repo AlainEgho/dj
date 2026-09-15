@@ -37,6 +37,11 @@ export interface AudioEngine {
 
   /** Fill the analyser buffers. Returns false when no source is active. */
   read(freq: Uint8Array, time: Float32Array): boolean;
+  /**
+   * A MediaStream carrying whatever the analyser hears (track, mic or system
+   * audio), for screen recording. Null where the platform cannot provide one.
+   */
+  getRecordingAudioStream?(): MediaStream | null;
   stop(): Promise<void>;
   dispose(): Promise<void>;
 }

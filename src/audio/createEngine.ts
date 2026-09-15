@@ -205,6 +205,21 @@ class WebAudioEngine implements AudioEngine {
     return true;
   }
 
+  private recordDest: MediaStreamAudioDestinationNode | null = null;
+
+  /** Everything the analyser hears, as a MediaStream for MediaRecorder. */
+  getRecordingAudioStream(): MediaStream | null {
+    const { ctx, analyser } = this.ensureContext();
+    if (!this.recordDest) {
+      this.recordDest = ctx.createMediaStreamDestination();
+      // the analyser sits after every source (mic, system, file), so tapping it
+      // records whatever is driving the show without changing what the
+      // speakers play
+      analyser.connect(this.recordDest);
+    }
+    return this.recordDest.stream;
+  }
+
   async stop() {
     await this.teardownSource();
     this.onEvent?.('stopped');

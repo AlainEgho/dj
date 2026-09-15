@@ -7,6 +7,7 @@ import { CUES, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } f
 import { PALETTES } from '../state/palettes';
 import { settingsStore } from '../state/settingsStore';
 import { triggerDrop } from '../stage/director';
+import { toggleRecording } from './recorder';
 
 const PALETTES_ORDER = PALETTES.map((p) => p.id);
 
@@ -146,6 +147,7 @@ export const KEYMAP: KeyBinding[] = [
       return down ? 'BLACKOUT' : 'Lights up';
     },
   },
+  { key: 'q', label: 'Record / stop recording (video + sound)', group: 'Live', run: () => toggleRecording() },
   { key: 'f', label: 'Fullscreen (browser)', group: 'Live', run: () => '' },
   { key: '?', label: 'Show / hide this key map', group: 'Live', run: () => '' },
 ];
