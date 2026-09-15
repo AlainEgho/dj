@@ -1,0 +1,312 @@
+import { useState } from 'react';
+import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { PALETTES, hslToHex } from '../state/palettes';
+import { CUES, RIG_STYLES, WALL_SHAPES, type ShowMode, type StageSettings, type WallMode } from '../state/presets';
+import { settingsStore, usePresets, useSettings } from '../state/settingsStore';
+import { Btn } from './ControlBar';
+import { Slider } from './Slider';
+import { theme } from './theme';
+
+const MODES: { id: ShowMode; label: string; blurb: string }[] = [
+  { id: 'chill', label: 'Chill', blurb: 'Slow sweeps, no strobes' },
+  { id: 'festival', label: 'Festival', blurb: 'Balanced main-stage look' },
+  { id: 'rave', label: 'Rave', blurb: 'Everything, all the time' },
+];
+
+const WALL_MODES: { id: WallMode; label: string }[] = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'spectrum', label: 'Spectrum' },
+  { id: 'shapes', label: 'Shapes' },
+  { id: 'text', label: 'Text' },
+  { id: 'off', label: 'Off' },
+];
+
+const TOGGLES: { key: keyof StageSettings; label: string }[] = [
+  { key: 'lasersEnabled', label: 'Lasers' },
+  { key: 'beamsEnabled', label: 'Moving heads' },
+  { key: 'strobeEnabled', label: 'Strobes' },
+  { key: 'pyroEnabled', label: 'Pyro' },
+  { key: 'ledEnabled', label: 'LED wall' },
+  { key: 'hazeEnabled', label: 'Haze' },
+];
+
+export function SettingsPanel() {
+  const s = useSettings();
+  const presets = usePresets();
+  const [presetName, setPresetName] = useState('');
+  const set = (p: Partial<StageSettings>) => settingsStore.update(p);
+
+  return (
+    <View style={styles.wrap}>
+      <Section title="Show mode">
+        <View style={styles.chips}>
+          {MODES.map((m) => (
+            <Pressable
+              key={m.id}
+              onPress={() => settingsStore.applyShowMode(m.id)}
+              style={[styles.modeChip, s.showMode === m.id && styles.chipActive]}
+            >
+              <Text style={styles.chipTitle}>{m.label}</Text>
+              <Text style={styles.chipBlurb}>{m.blurb}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {s.showMode === 'custom' ? <Text style={styles.note}>Custom (edited)</Text> : null}
+      </Section>
+
+      <Section title="Colour palette">
+        <View style={styles.chips}>
+          {PALETTES.map((p) => {
+            const hue = p.id === 'custom' ? s.customHue : p.hue;
+            const swatch = p.id === 'auto' ? theme.accent : hslToHex(hue / 360, Math.max(0.15, p.saturation), 0.55);
+            return (
+              <Pressable
+                key={p.id}
+                onPress={() => set({ paletteId: p.id })}
+                style={[styles.paletteChip, s.paletteId === p.id && styles.chipActive]}
+              >
+                <View style={[styles.swatch, { backgroundColor: swatch }]} />
+                <Text style={styles.chipTitle}>{p.name}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {s.paletteId === 'custom' ? (
+          <Slider label="Base hue" value={s.customHue} min={0} max={360} step={1} onChange={(v) => set({ customHue: v })} format={(v) => `${Math.round(v)}°`} />
+        ) : null}
+        <Slider label="Hue cycling (per beat)" value={s.hueCycleSpeed} onChange={(v) => set({ hueCycleSpeed: v })} />
+      </Section>
+
+      <Section title="Show pacing">
+        <Slider
+          label="Pacing"
+          value={s.pacing}
+          onChange={(v) => set({ pacing: v })}
+          format={(v) => (v < 0.3 ? 'Cinematic' : v < 0.6 ? 'Festival' : 'Club')}
+        />
+        <Text style={[styles.note, { marginBottom: 6 }]}>Rig style</Text>
+        <View style={styles.chips}>
+          {RIG_STYLES.map((r) => (
+            <Pressable
+              key={r.id}
+              onPress={() => set({ rigStyle: r.id })}
+              style={[styles.paletteChip, s.rigStyle === r.id && styles.chipActive]}
+            >
+              <Text style={styles.chipTitle}>{r.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={[styles.note, { marginBottom: 8 }]}>
+          Festival: lasers on the truss and floor, beams and lasers together. Arena: floor lasers only, one element at a time.
+          Mix: both.
+        </Text>
+        <Text style={[styles.note, { marginBottom: 6 }]}>Cue</Text>
+        <View style={styles.chips}>
+          {CUES.map((c) => (
+            <Pressable
+              key={c.id}
+              onPress={() => set({ cue: c.id })}
+              style={[styles.paletteChip, s.cue === c.id && styles.chipActive]}
+            >
+              <Text style={styles.chipTitle}>{c.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={styles.toggleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.toggleLabel}>Auto cues</Text>
+            <Text style={styles.note}>Change looks every phrase: wall, beams, laser sweeps, laser mesh, blackouts</Text>
+          </View>
+          <Switch
+            value={s.autoCues}
+            onValueChange={(v) => set({ autoCues: v })}
+            trackColor={{ true: theme.accent, false: 'rgba(255,255,255,0.2)' }}
+            thumbColor="#fff"
+          />
+        </View>
+      </Section>
+
+      <Section title="LED wall">
+        <View style={styles.chips}>
+          {WALL_MODES.map((m) => (
+            <Pressable
+              key={m.id}
+              onPress={() => set({ wallMode: m.id })}
+              style={[styles.paletteChip, s.wallMode === m.id && styles.chipActive]}
+            >
+              <Text style={styles.chipTitle}>{m.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        {s.wallMode === 'shapes' ? (
+          <View style={styles.chips}>
+            {WALL_SHAPES.map((sh) => (
+              <Pressable
+                key={sh.id}
+                onPress={() => set({ wallShape: sh.id })}
+                style={[styles.paletteChip, s.wallShape === sh.id && styles.chipActive]}
+              >
+                <Text style={styles.chipTitle}>{sh.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+        <TextInput
+          value={s.wallText}
+          onChangeText={(v) => set({ wallText: v.slice(0, 200) })}
+          placeholder="Words, comma separated: ANYMA, AFTERLIFE, A, B"
+          placeholderTextColor={theme.textDim}
+          autoCapitalize="characters"
+          style={styles.input}
+        />
+        <Text style={styles.note}>
+          Each word up to 13 characters, typed in letter by letter. In Auto mode a random word appears on some wall phrases;
+          in Text mode the words rotate.
+        </Text>
+      </Section>
+
+      <Section title="Intensity">
+        <Slider label="Effect intensity" value={s.intensity} onChange={(v) => set({ intensity: v })} />
+        <Slider
+          label="Audio sensitivity"
+          value={s.sensitivity}
+          onChange={(v) => set({ sensitivity: v })}
+          format={(v) => (v < 0.33 ? 'Low (loud rooms)' : v < 0.66 ? 'Normal' : 'High (quiet source)')}
+        />
+        <Slider label="Audio reactivity" value={s.reactivity} onChange={(v) => set({ reactivity: v })} />
+        <Slider label="Laser density" value={s.laserDensity} onChange={(v) => set({ laserDensity: v })} />
+        <Text style={[styles.note, { marginBottom: 6 }]}>Laser colour</Text>
+        <View style={styles.chips}>
+          {(
+            [
+              { id: 'mixed', label: 'Green + palette' },
+              { id: 'green', label: 'Green' },
+              { id: 'palette', label: 'Palette' },
+            ] as { id: StageSettings['laserColor']; label: string }[]
+          ).map((c) => (
+            <Pressable
+              key={c.id}
+              onPress={() => set({ laserColor: c.id })}
+              style={[styles.paletteChip, s.laserColor === c.id && styles.chipActive]}
+            >
+              <View style={[styles.swatch, { backgroundColor: c.id === 'palette' ? theme.accent : '#33ff4d' }]} />
+              <Text style={styles.chipTitle}>{c.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Slider label="Moving heads" value={s.beamCount} min={4} max={24} step={1} onChange={(v) => set({ beamCount: v })} />
+      </Section>
+
+      <Section title="Elements">
+        {TOGGLES.map((t) => (
+          <View key={t.key} style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>{t.label}</Text>
+            <Switch
+              value={Boolean(s[t.key])}
+              onValueChange={(v) => set({ [t.key]: v } as Partial<StageSettings>)}
+              trackColor={{ true: theme.accent, false: 'rgba(255,255,255,0.2)' }}
+              thumbColor="#fff"
+            />
+          </View>
+        ))}
+      </Section>
+
+      <Section title="Presets">
+        <View style={styles.presetSave}>
+          <TextInput
+            value={presetName}
+            onChangeText={setPresetName}
+            placeholder="Preset name"
+            placeholderTextColor={theme.textDim}
+            style={styles.input}
+          />
+          <Btn
+            label="Save current"
+            tone="accent"
+            onPress={() => {
+              void settingsStore.savePreset(presetName);
+              setPresetName('');
+            }}
+          />
+        </View>
+        {presets.length === 0 ? <Text style={styles.note}>No saved presets yet.</Text> : null}
+        {presets.map((p) => (
+          <View key={p.id} style={styles.presetRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.presetName}>{p.name}</Text>
+              <Text style={styles.note}>{new Date(p.createdAt).toLocaleString()}</Text>
+            </View>
+            <Btn label="Load" onPress={() => settingsStore.loadPreset(p.id)} />
+            <Btn label="Delete" tone="danger" onPress={() => void settingsStore.deletePreset(p.id)} />
+          </View>
+        ))}
+        <View style={{ marginTop: 8 }}>
+          <Btn label="Reset to defaults" onPress={() => settingsStore.reset()} />
+        </View>
+      </Section>
+    </View>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: { gap: 18 },
+  section: {
+    backgroundColor: theme.panel,
+    borderRadius: theme.radius,
+    borderWidth: 1,
+    borderColor: theme.border,
+    padding: 14,
+  },
+  sectionTitle: { color: theme.textDim, fontSize: 12, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 12 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  modeChip: {
+    flexGrow: 1,
+    minWidth: 120,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  paletteChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: theme.border,
+  },
+  chipActive: { borderColor: theme.accent, backgroundColor: theme.accentSoft },
+  chipTitle: { color: theme.text, fontSize: 14, fontWeight: '600' },
+  chipBlurb: { color: theme.textDim, fontSize: 11, marginTop: 2 },
+  swatch: { width: 16, height: 16, borderRadius: 8 },
+  note: { color: theme.textDim, fontSize: 12 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 },
+  toggleLabel: { color: theme.text, fontSize: 14 },
+  presetSave: { flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 10 },
+  input: {
+    flex: 1,
+    color: theme.text,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+  },
+  presetRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 },
+  presetName: { color: theme.text, fontSize: 14, fontWeight: '600' },
+});

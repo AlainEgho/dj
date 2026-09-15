@@ -1,0 +1,229 @@
+import { useEffect, useMemo, useRef } from 'react';
+import * as THREE from 'three';
+import { useFrame } from './fiber';
+import { laserFragment, laserVertex } from './shaders';
+import { director, stage } from './stageState';
+import { useSettings } from '../state/settingsStore';
+import type { RigStyle } from '../state/presets';
+
+const FAN_SIZE = 34;
+
+interface Fixture {
+  x: number;
+  y: number;
+  z: number;
+  /** true = truss fixture firing downwards, false = floor fixture firing up */
+  fromTruss: boolean;
+  phase: number;
+  speed: number;
+  /** fixed pan used in mesh mode so fans cross each other */
+  meshPan: number;
+}
+
+function buildFixtures(density: number, style: RigStyle): Fixture[] {
+  const fixtures: Fixture[] = [];
+  // Most lasers sit along the stage front at floor level and fire up and over
+  // the crowd (see any Armin / Afterlife rig). A few hang on the truss.
+  const floorCount = Math.round(3 + density * 5);
+  for (let i = 0; i < floorCount; i++) {
+    const t = floorCount === 1 ? 0.5 : i / (floorCount - 1);
+    fixtures.push({
+      x: (t - 0.5) * 18,
+      y: 0.4,
+      z: -0.8,
+      fromTruss: false,
+      phase: i * 2.1 + 0.7,
+      speed: 0.7 + (i % 2) * 0.2,
+      meshPan: (i % 2 === 0 ? -1 : 1) * (0.22 + (i % 3) * 0.06),
+    });
+  }
+  // Truss-mounted lasers (the original festival rig) fire down and out over
+  // the crowd. The arena style leaves them off for a cleaner picture.
+  const trussCount: number = style === 'arena' ? 0 : Math.round(1 + density * 3);
+  for (let i = 0; i < trussCount; i++) {
+    const t = trussCount === 1 ? 0.5 : i / (trussCount - 1);
+    fixtures.push({
+      x: (t - 0.5) * 16 + 0.6,
+      y: 8.8,
+      z: -2.0,
+      fromTruss: true,
+      phase: i * 1.3,
+      speed: 0.8 + (i % 3) * 0.15,
+      meshPan: (i % 2 === 0 ? 1 : -1) * 0.3,
+    });
+  }
+  return fixtures;
+}
+
+/**
+ * Laser fixtures on the truss and the stage floor. Every fan starts at a
+ * visible laser head (box + glowing emitter) and is posed in 3D:
+ *  - sweep: fans tilt up and down over the audience and pan slowly
+ *  - mesh: fans lock to crossing angles with many lines (laser net)
+ *  - audience: fans lie almost flat and shoot over the crowd toward the viewer
+ * The director crossfades between the three poses.
+ */
+export function LaserRig() {
+  const { laserDensity: density, rigStyle } = useSettings();
+  const fixtures = useMemo(() => buildFixtures(density, rigStyle), [density, rigStyle]);
+  const geometry = useMemo(() => new THREE.PlaneGeometry(FAN_SIZE, FAN_SIZE), []);
+  const headGeo = useMemo(() => new THREE.BoxGeometry(0.55, 0.32, 0.5), []);
+  const emitterGeo = useMemo(() => new THREE.SphereGeometry(0.04, 8, 8), []);
+  const headMat = useMemo(() => new THREE.MeshStandardMaterial({ color: 0x15151a, metalness: 0.8, roughness: 0.4 }), []);
+  const materials = useMemo(
+    () =>
+      fixtures.map(
+        () =>
+          new THREE.ShaderMaterial({
+            vertexShader: laserVertex,
+            fragmentShader: laserFragment,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            uniforms: {
+              uTime: { value: 0 },
+              uTreble: { value: 0 },
+              uBeat: { value: 0 },
+              uIntensity: { value: 1 },
+              uLines: { value: 8 },
+              uSpread: { value: 1 },
+              uSweep: { value: 0 },
+              uFanSize: { value: FAN_SIZE },
+              uWidth: { value: 0.045 },
+              uColorA: { value: new THREE.Color() },
+              uColorB: { value: new THREE.Color() },
+            },
+          }),
+      ),
+    [fixtures],
+  );
+  const emitterMats = useMemo(() => fixtures.map(() => new THREE.MeshBasicMaterial({ color: 0xffffff })), [fixtures]);
+
+  useEffect(
+    () => () => {
+      materials.forEach((m) => m.dispose());
+      emitterMats.forEach((m) => m.dispose());
+    },
+    [materials, emitterMats],
+  );
+  useEffect(
+    () => () => {
+      geometry.dispose();
+      headGeo.dispose();
+      emitterGeo.dispose();
+      headMat.dispose();
+    },
+    [geometry, headGeo, emitterGeo, headMat],
+  );
+
+  const fanRefs = useRef<(THREE.Group | null)[]>([]);
+
+  useFrame(() => {
+    const s = stage;
+    // Build-ups bring the lasers up gradually even in beam looks; the pre-drop
+    // blackout kills everything for a beat.
+    const build = director.build;
+    const weight = s.settings.lasersEnabled ? Math.min(1, director.lasers + build * 0.6) * (1 - director.blackout) : 0;
+    const wMesh = director.mesh;
+    const wSheet = director.sheet * (1 - wMesh);
+    const wAim = director.laserAim * (1 - wMesh - wSheet);
+    const wSweep = Math.max(0, 1 - wMesh - wSheet - wAim);
+    // when every fixture fires, slow the sweep a little so the picture stays readable
+    const sweepSpeed = s.pace * (0.15 + s.mid * 0.3) * (1 + build * 0.8) * (1 - director.gAll * 0.35);
+    const sweepLines = 6 + s.settings.laserDensity * 4 + build * 6;
+
+    for (let i = 0; i < fixtures.length; i++) {
+      const g = fanRefs.current[i];
+      const m = materials[i];
+      const f = fixtures[i];
+      if (!g) continue;
+      // Which fixtures fire this phrase (truss / floor / centre / all), crossfaded
+      const isMiddle = Math.abs(f.x) < 6;
+      const groupFactor = Math.max(director.gAll, f.fromTruss ? director.gTop : director.gBottom, isMiddle ? director.gMiddle : 0);
+      const fixtureWeight = weight * groupFactor;
+      const visible = fixtureWeight > 0.01;
+      g.visible = visible;
+      {
+        const mode = s.settings.laserColor;
+        const green = mode === 'green' || (mode === 'mixed' && i % 2 === 1);
+        emitterMats[i].color
+          .copy(green ? LASER_GREEN : i % 2 === 0 ? s.colorA : s.colorB)
+          .lerp(WHITE, 0.5)
+          .multiplyScalar(0.4 + weight * 0.8);
+      }
+      if (!visible) continue;
+
+      const t = s.time * sweepSpeed * f.speed + f.phase;
+      // All poses keep the lowest line of every fan above the viewer's eye
+      // line, so beams pass overhead like a real rig instead of through the
+      // camera. Tilt is measured from vertical toward the audience.
+      // Sweep pose: fans rise and fall over the crowd, pan drifts slowly.
+      const sweepTilt = (f.fromTruss ? 0.6 : 0.45) + Math.sin(t) * 0.2;
+      const sweepPan = Math.sin(t * 0.6 + f.phase) * 0.3;
+      // Mesh pose: every fan fires up and out at the same steady angle with
+      // alternating pans, so neighbouring fans cross into a lattice overhead.
+      const meshTilt = (f.fromTruss ? 0.85 : 0.7) + Math.sin(s.time * 0.12 * s.pace + f.phase) * 0.03;
+      const meshPan = f.meshPan + Math.sin(s.time * 0.1 * s.pace + f.phase) * 0.04;
+      // Audience pose: narrow bundles skimming just over the heads toward the viewer.
+      // floor fans open toward the viewer and slowly sweep across eye level
+      const aimTilt = (f.fromTruss ? 1.45 : 0.92) + Math.sin(s.time * 0.18 * s.pace + f.phase) * 0.08;
+      const aimPan = (i % 2 === 0 ? 0.25 : -0.25) + Math.sin(s.time * 0.1 * s.pace + f.phase) * 0.12;
+
+      // Sheet pose: a nearly flat plane seen almost edge-on, scanning slowly
+      // between overhead and just above the crowd; fixtures are staggered so the
+      // planes stack at different heights.
+      const sheetTilt = (f.fromTruss ? 1.47 : 1.35) + Math.sin(s.time * 0.2 * s.pace + i * 0.55) * (f.fromTruss ? 0.05 : 0.12);
+      const sheetPan = (i % 2 === 0 ? 0.06 : -0.06);
+
+      const tilt = sweepTilt * wSweep + meshTilt * wMesh + aimTilt * wAim + sheetTilt * wSheet;
+      const pan = sweepPan * wSweep + meshPan * wMesh + aimPan * wAim + sheetPan * wSheet;
+      // Truss fans point down (flipped around z); negative tilt leans them toward the camera.
+      g.rotation.set(f.fromTruss ? -tilt : tilt, pan, f.fromTruss ? Math.PI : 0);
+
+      const u = m.uniforms;
+      u.uTime.value = s.time;
+      u.uTreble.value = s.treble * 0.6;
+      u.uBeat.value = s.beatEnv * (1 - wMesh * 0.7);
+      u.uIntensity.value =
+        fixtureWeight * s.settings.intensity * (0.55 + s.amp * 0.45) * (1 + wMesh * 0.3 + wAim * 0.2 - wSheet * 0.5 + director.white * 0.4);
+      u.uLines.value = sweepLines * wSweep + 16 * wMesh + 9 * wAim + 40 * wSheet;
+      u.uSpread.value = 1.0 * wSweep + 0.9 * wMesh + 0.7 * wAim + 2.4 * wSheet;
+      // sheets use very wide beams so the lines fuse into one solid plane
+      u.uWidth.value = 0.045 + wSheet * 1.5 + director.white * 0.02;
+      u.uSweep.value = Math.sin(t * 0.8) * 0.35 * wSweep + Math.sin(s.time * 0.08 + f.phase) * 0.08 * (wMesh + wAim);
+      // Real laser fans are one colour each. Classic rigs are 532nm green; the
+      // "mixed" setting alternates green with the palette colour per emitter.
+      const mode = s.settings.laserColor;
+      const useGreen = mode === 'green' || (mode === 'mixed' && i % 2 === 1);
+      const col = u.uColorA.value as THREE.Color;
+      if (useGreen) col.copy(LASER_GREEN);
+      else col.copy(i % 2 === 0 ? s.colorA : s.colorB);
+      // white lasers right after a drop, fading back to colour
+      if (director.white > 0) col.lerp(WHITE, director.white);
+      (u.uColorB.value as THREE.Color).copy(col);
+    }
+  });
+
+  return (
+    <group>
+      {fixtures.map((f, i) => (
+        <group key={i} position={[f.x, f.y, f.z]}>
+          {/* laser head: housing sits just behind the emitter, the fan apex is the emitter */}
+          <mesh geometry={headGeo} material={headMat} position={[0, f.fromTruss ? 0.18 : -0.18, -0.2]} />
+          <mesh geometry={emitterGeo} material={emitterMats[i]} />
+          <group
+            ref={(el) => {
+              fanRefs.current[i] = el;
+            }}
+          >
+            <mesh geometry={geometry} material={materials[i]} position={[0, FAN_SIZE / 2, 0]} frustumCulled={false} />
+          </group>
+        </group>
+      ))}
+    </group>
+  );
+}
+
+const WHITE = new THREE.Color(1, 1, 1);
+const LASER_GREEN = new THREE.Color(0.2, 1.0, 0.3);
