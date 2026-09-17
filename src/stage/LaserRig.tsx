@@ -47,7 +47,7 @@ function assignMirrorRanks(fixtures: Fixture[]) {
   }
 }
 
-function buildFixtures(density: number, style: RigStyle): Fixture[] {
+function buildFixtures(density: number, _style: RigStyle): Fixture[] {
   const fixtures: Fixture[] = [];
   // Most lasers sit along the stage front at floor level and fire up and over
   // the crowd (see any Armin / Afterlife rig). A few hang on the truss.
@@ -66,11 +66,9 @@ function buildFixtures(density: number, style: RigStyle): Fixture[] {
       mirrorCount: 1,
     });
   }
-  // Truss-mounted lasers (the original festival rig) fire down and out over
-  // the crowd. The arena style leaves them off for a cleaner picture. The row
-  // matches the floor row in size so a "top only" cue reads as a full row and
-  // "top centre" lights several fixtures rather than one.
-  const trussCount: number = style === 'arena' ? 0 : Math.round(3 + density * 5);
+  // Truss-mounted lasers fire down and out over the crowd. Arena auto-cues
+  // still prefer the floor, but the row stays in the rig so a "top" group works.
+  const trussCount = Math.round(3 + density * 5);
   for (let i = 0; i < trussCount; i++) {
     const t = trussCount === 1 ? 0.5 : i / (trussCount - 1);
     fixtures.push({

@@ -13,6 +13,15 @@ function fmtTime(s: number) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+function idleHint() {
+  if (Platform.OS !== 'web') return 'Pick a source: microphone or load a track from your files.';
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent);
+  if (mac) {
+    return 'On Mac, use Chrome. Share Entire Screen or a window and enable “Share system audio” (Chrome 141+). Older Chrome: share a Chrome tab with “Share tab audio”. Safari cannot capture system audio.';
+  }
+  return 'Pick a source: microphone, share a tab/system audio, or load a track.';
+}
+
 interface BtnProps {
   label: string;
   onPress: () => void;
@@ -98,13 +107,7 @@ export function ControlBar() {
         ) : null}
         <Btn label="Projection" tone="accent" onPress={() => router.push('/projection')} />
       </View>
-      {state.source === 'none' ? (
-        <Text style={styles.hint}>
-          {Platform.OS === 'web'
-            ? 'Pick a source: microphone, share a tab/system audio, or load a track.'
-            : 'Pick a source: microphone or load a track from your files.'}
-        </Text>
-      ) : null}
+      {state.source === 'none' ? <Text style={styles.hint}>{idleHint()}</Text> : null}
     </View>
   );
 }

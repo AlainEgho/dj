@@ -81,6 +81,8 @@ export function LEDBackdrop() {
         vertexShader: ledVertex,
         fragmentShader: ledFragment,
         toneMapped: false,
+        transparent: true,
+        depthWrite: false,
         uniforms: {
           uSpectrum: { value: spectrumTex },
           uHistory: { value: historyTex },
@@ -94,6 +96,7 @@ export function LEDBackdrop() {
           uBass: { value: 0 },
           uAmp: { value: 0 },
           uBeat: { value: 0 },
+          uFall: { value: 0 },
           uIntensity: { value: 1 },
           uWall: { value: 1 },
           uHue: { value: 0 },
@@ -104,6 +107,9 @@ export function LEDBackdrop() {
           uBlend: { value: 0 },
           uShapeA: { value: 0 },
           uShapeB: { value: 0 },
+          uBackShape: { value: 0 },
+          uBurst: { value: 0 },
+          uEarth: { value: 0 },
           uGrid: { value: new THREE.Vector2(80, 40) },
         },
       }),
@@ -145,6 +151,15 @@ export function LEDBackdrop() {
     forcedIndex: 0,
     histRow: 0,
     histLast: 0,
+    slam: 0,
+    slamDir: 0,
+    slamLeft: 0,
+    beats: 0,
+    backShape: 0,
+    backLast: 0,
+    burst: 0,
+    earth: 0,
+    earthFrom: -1,
   });
 
   useFrame(() => {
@@ -212,6 +227,18 @@ export function LEDBackdrop() {
     u.uShapeA.value = f.shapeA;
     u.uShapeB.value = f.shapeB;
     u.uBlend.value = f.blend;
+    if (wantMode === 0) {
+      if (s.time - f.backLast > 8 || f.backLast === 0) {
+        f.backLast = s.time;
+        f.backShape = wantShape;
+        if (s.settings.wallMode === 'spectrum') {
+          f.backShape = (f.backShape + 1) % WALL_SHAPE_COUNT;
+        }
+      }
+    } else {
+      f.backShape = wantShape;
+    }
+    u.uBackShape.value = f.backShape;
     // Type the word in one letter at a time, but never slower than "whole word
     // in ~2s", hold, then fade it out so no word stays longer than WORD_LIFETIME.
     const glyphs = Math.max(1, textTex.current.glyphs);
@@ -236,6 +263,37 @@ export function LEDBackdrop() {
     u.uAmp.value = s.amp;
     const beat = Number.isFinite(s.beatEnv) ? s.beatEnv : 0;
     u.uBeat.value = beat;
+    if (director.drop) f.slamLeft = Math.max(f.slamLeft, 2);
+    if (s.beat) {
+      f.beats++;
+      if (f.beats % 2 === 0) f.slamLeft = Math.max(f.slamLeft, 1);
+    }
+    if (f.slamDir === 0 && f.slamLeft > 0) f.slamDir = 1;
+    if (f.slamDir > 0) {
+      f.slam = Math.min(1, f.slam + s.dt / 0.12);
+      if (f.slam >= 1) f.slamDir = -1;
+    } else if (f.slamDir < 0) {
+      f.slam = Math.max(0, f.slam - s.dt / 0.28);
+      if (f.slam <= 0) {
+        f.slamLeft = Math.max(0, f.slamLeft - 1);
+        f.slamDir = f.slamLeft > 0 ? 1 : 0;
+      }
+    }
+    u.uFall.value = f.slam;
+    // Big drop: the centre star detonates white, then pixel Earth fades in.
+    if (director.drop) {
+      f.burst = 1;
+      f.earth = 0;
+      f.earthFrom = s.time;
+    }
+    if (f.burst > 0) f.burst = Math.max(0, f.burst - s.dt / 1.15);
+    if (f.earthFrom >= 0) {
+      const age = s.time - f.earthFrom;
+      if (age > 0.55 && age < 11) f.earth = Math.min(1, f.earth + s.dt / 1.5);
+      else if (age >= 11) f.earth = Math.max(0, f.earth - s.dt / 2.8);
+    }
+    u.uBurst.value = f.burst;
+    u.uEarth.value = f.earth;
     // Operator wall modes stay up even during laser-only looks. Auto still
     // follows the director, with a readable floor whenever the wall is in.
     const forced = s.settings.wallMode !== 'auto' && s.settings.wallMode !== 'off';

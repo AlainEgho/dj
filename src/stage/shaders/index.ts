@@ -138,6 +138,7 @@ export const ledFragment = /* glsl */ `
   uniform float uBass;
   uniform float uAmp;
   uniform float uBeat;
+  uniform float uFall;      // 0 = bars up, 1 = all collapsed
   uniform float uIntensity;
   uniform float uWall;
   uniform float uHue;
@@ -148,6 +149,9 @@ export const ledFragment = /* glsl */ `
   uniform float uBlend;
   uniform float uShapeA;
   uniform float uShapeB;
+  uniform float uBackShape;  // gray/white shape layer under the spectrum
+  uniform float uBurst;      // 0..1 white star explosion on a big drop
+  uniform float uEarth;      // 0..1 pixel Earth after the explosion
   uniform vec2 uGrid;
 
   vec3 hsl2rgb(vec3 c) {
@@ -183,23 +187,46 @@ export const ledFragment = /* glsl */ `
 
   float spectrumContent(vec2 cc) {
     vec2 cell = floor(cc * uGrid);
-    float sx = abs(cc.x - 0.5) * 2.0;
-    float spec = pow(texture2D(uSpectrum, vec2(pow(sx, 1.35), 0.5)).r, 0.75);
-    float fallback = (uBass * 0.22 + uAmp * 0.12) * (1.0 - sx * 0.75);
-    float height = max(spec * (0.7 + uAmp * 0.22 + uBeat * 0.08), fallback);
-    float bar = step(cc.y, height);
-    // solid body; only the top of each column flickers
-    float head = smoothstep(height - 0.1, height, cc.y);
-    float tick = floor(uTime * 14.0);
-    float r1 = hash2(cell + tick * 0.37);
-    bar *= mix(1.0, step(0.28, r1), head);
+    // Even column spacing: 2 LEDs on, 2 off — continuous bars with a regular gap.
+    float colPeriod = 4.0;
+    float colW = 2.0;
+    float colPhase = mod(cell.x, colPeriod);
+    float inCol = step(colPhase, colW - 0.5);
+
+    float bandX = (floor(cell.x / colPeriod) + 0.5) * colPeriod / uGrid.x;
+    float sx = abs(bandX - 0.5) * 2.0;
+    float spec = pow(texture2D(uSpectrum, vec2(pow(sx, 1.35), 0.5)).r, 0.72);
+    float height = spec * (0.84 + uBeat * 0.10);
+    height = max(height, uBass * 0.06 * (1.0 - sx));
+    height *= 1.0 - uFall;
+
+    // Sometimes (random ~2.5s windows) only the peak caps stay on.
+    float tHead = uTime * 0.38;
+    float chunk = floor(tHead);
+    float frac = fract(tHead);
+    float wantHead = step(0.58, hash2(vec2(chunk, 8.3)));
+    float headsOnly = wantHead * smoothstep(0.0, 0.1, frac) * smoothstep(1.0, 0.78, frac);
+
+    float dropPeriod = 3.0;
+    float inDrop = step(mod(cell.y, dropPeriod), 1.5);
+    float below = step(cc.y, height + 0.02);
+    float body = inCol * inDrop * below * (0.55 + spec * 0.7) * (1.0 - headsOnly);
+
+    float nearPeak = smoothstep(height - 0.12, height, cc.y) * below * step(0.04, height);
+    float head = inCol * nearPeak * (0.8 + uBeat * 0.4);
+
+    // Spill onto neighbouring black tiles: beside the bar, and a halo around the cap.
+    float gap = min(max(0.0, colPhase - (colW - 1.0)), colPeriod - colPhase);
+    float nearX = exp(-gap * 1.05);
+    float beside = step(cc.y, height) * (0.16 + spec * 0.28);
+    float capHalo = (1.0 - smoothstep(0.0, 0.14, abs(cc.y - height))) * (0.35 + uBeat * 0.25);
+    float yGlow = mix(max(beside, capHalo), capHalo, headsOnly);
+    float bleed = (1.0 - inCol) * nearX * yGlow;
+    float vertGap = (1.0 - inDrop) * inCol * below * (1.0 - headsOnly) * (0.14 + spec * 0.12);
+
     float r2 = hash2(cell * 1.7 + floor(uTime * 12.0) * 0.61);
-    float sparkle = step(0.988 - uAmp * 0.016, r2) * 0.75;
-    vec2 p = (cc - 0.5) * vec2(2.0, 1.0);
-    float cloud = clouds(p, uTime * uPace, uAmp) * 0.22;
-    float d = distance(cc, vec2(0.5, 0.28));
-    float ripple = pow(sin(d * 14.0 - uTime * 2.5 * uPace) * 0.5 + 0.5, 5.0) * uBass * 0.55;
-    return max(max(bar, ripple), max(sparkle, cloud));
+    float sparkle = inCol * below * (1.0 - headsOnly) * step(0.996 - uAmp * 0.008, r2) * 0.35;
+    return max(max(max(body, head), max(bleed, vertGap)), sparkle);
   }
 
   // Signed distance to a rounded box centred at c
@@ -423,17 +450,110 @@ export const ledFragment = /* glsl */ `
       vec3 bg = vec3(0.02, 0.0, 0.03);
       return mix(bg, heat, smoothstep(0.02, 0.15, lum)) * (0.8 + lum * 0.9);
     }
-    // spectrum stays saturated but dimmer than shapes/text
-    float sat = uSat * (mode < 0.5 ? 1.0 : 0.55);
-    float light = mode < 0.5 ? 0.5 : 0.72;
+    // Spectrum: a frequency ribbon on the palette's analog side (warm bass,
+    // cooler treble, hot peaks). Unused tiles stay dark so the complementary
+    // shape layer can show through without sharing this hue.
+    if (mode < 0.5) {
+      float sx = abs(cc.x - 0.5) * 2.0;
+      float specHue = fract(uHue - 0.03 + sx * 0.20 + cc.y * 0.08);
+      float sat = mix(0.72, 1.0, lum) * max(0.62, uSat);
+      float light = mix(0.36, 0.58, lum) + cc.y * 0.14;
+      vec3 col = hsl2rgb(vec3(specHue, sat, clamp(light, 0.0, 0.78)));
+      vec3 peak = vec3(1.0, 0.90, 0.72);
+      col = mix(col, peak, smoothstep(0.5, 1.0, lum) * smoothstep(0.45, 1.0, cc.y) * 0.55);
+      return col * (0.5 + lum * 1.05);
+    }
+    float sat = uSat * 0.55;
+    float light = 0.72;
     float d = distance(cc, vec2(0.5));
     float hue = uHue + cc.y * 0.06 + d * 0.04;
     vec3 col = hsl2rgb(vec3(fract(hue), sat, light));
     vec3 bg = hsl2rgb(vec3(fract(uHue + 0.08), uSat * 0.6, 0.05));
-    float flash = uBeat * 0.1 * step(mode, 0.5);
-    lum = clamp(lum + flash, 0.0, 1.0);
-    float lift = mode < 0.5 ? 0.45 + lum * 0.65 : 0.7 + lum * 1.1;
+    lum = clamp(lum, 0.0, 1.0);
+    float lift = 0.7 + lum * 1.1;
     return mix(bg, col, lum) * lift;
+  }
+
+  float cellAlpha(float mode, float lum, vec2 cell) {
+    if (mode > 0.5) return 1.0;
+    float rnd = hash2(cell * 1.31 + 0.7);
+    float flicker = mix(0.55, 1.0, hash2(cell * 2.17 + floor(uTime * 5.0) * 0.41));
+    float hole = mix(0.04, 0.48, rnd) * flicker;
+    return mix(hole, 1.0, smoothstep(0.02, 0.18, lum));
+  }
+
+  // Pixelated galaxy nebula + field of stars (one colour per LED cell).
+  vec3 galaxyPixel(vec2 cell, vec2 gc) {
+    vec2 p = (gc - 0.5) * vec2(2.0, 1.0);
+    float r = length(p);
+    float a = atan(p.y, p.x);
+    float arm = 0.5 + 0.5 * sin(a * 2.0 + r * 7.5 - uTime * 0.07);
+    float neb = fbm(p * 3.2 + vec2(uTime * 0.018, uTime * 0.01));
+    float dust = fbm(p * 6.1 - vec2(uTime * 0.012, 0.4));
+    vec3 deep = vec3(0.03, 0.01, 0.10);
+    vec3 mag = vec3(0.62, 0.14, 0.82);
+    vec3 cyan = vec3(0.12, 0.38, 0.95);
+    vec3 gold = vec3(0.95, 0.62, 0.22);
+    vec3 col = deep;
+    col = mix(col, mag, smoothstep(0.32, 0.78, neb) * (0.35 + arm * 0.5));
+    col = mix(col, cyan, smoothstep(0.48, 0.92, neb) * (1.0 - r * 0.65));
+    col = mix(col, gold, smoothstep(0.62, 1.0, dust) * arm * 0.4);
+    float star = step(0.968, hash2(cell * 1.17 + 0.3));
+    float tw = 0.45 + 0.55 * hash2(cell + floor(uTime * 4.0) * 0.11);
+    col += vec3(1.0, 0.94, 0.82) * star * tw;
+    return col;
+  }
+
+  // Bright star in the middle of the wall.
+  vec3 centerStar(vec2 gc) {
+    vec2 p = (gc - 0.5) * vec2(2.0, 1.0);
+    float r = length(p);
+    float core = smoothstep(0.07, 0.0, r);
+    float hx = smoothstep(0.018, 0.0, abs(p.x)) * smoothstep(0.38, 0.0, abs(p.y));
+    float hy = smoothstep(0.018, 0.0, abs(p.y)) * smoothstep(0.28, 0.0, abs(p.x));
+    float glow = exp(-r * 7.5);
+    return vec3(1.0, 0.96, 0.82) * (core * 1.5 + max(hx, hy) * 0.75 + glow * 0.5);
+  }
+
+  // All-white supernova: expanding ring, fill, and pixel sparks.
+  vec3 starBurst(vec2 cell, vec2 gc, float burst) {
+    vec2 p = (gc - 0.5) * vec2(2.0, 1.0);
+    float r = length(p);
+    float rad = burst * 1.35;
+    float ring = smoothstep(0.14, 0.0, abs(r - rad));
+    float fill = (1.0 - smoothstep(0.0, rad, r)) * (1.0 - burst * 0.55);
+    float rays = pow(max(0.0, sin(atan(p.y, p.x) * 12.0 + uTime * 4.0)), 8.0);
+    rays *= smoothstep(1.05, 0.0, r) * burst;
+    float spark = step(0.90, hash2(cell + floor(uTime * 18.0))) * burst;
+    return vec3(1.0) * (fill * 0.95 + ring * 1.2 + rays * 0.85 + spark);
+  }
+
+  // Pixel Earth: oceans, land, ice caps, clouds, on a disc.
+  vec3 earthPixel(vec2 gc) {
+    vec2 p = (gc - 0.5) * vec2(2.0, 1.0);
+    float R = 0.40;
+    float d = length(p);
+    float inside = smoothstep(R + 0.01, R - 0.01, d);
+    float z = sqrt(max(0.0, R * R - d * d));
+    vec3 nrm = vec3(p.x / R, p.y / R, z / R);
+    float lon = atan(nrm.x, nrm.z) + uTime * 0.14;
+    float lat = nrm.y;
+    float land = fbm(vec2(lon, lat) * 2.6 + vec2(2.7, 1.1));
+    float cloud = fbm(vec2(lon, lat) * 3.4 + vec2(uTime * 0.06, 0.8));
+    vec3 ocean = vec3(0.07, 0.16, 0.52);
+    vec3 grass = vec3(0.16, 0.46, 0.20);
+    vec3 desert = vec3(0.52, 0.42, 0.18);
+    vec3 ice = vec3(0.88, 0.93, 0.98);
+    vec3 col = ocean;
+    col = mix(col, grass, smoothstep(0.50, 0.62, land));
+    col = mix(col, desert, smoothstep(0.66, 0.82, land) * (1.0 - abs(lat)));
+    col = mix(col, ice, smoothstep(0.70, 0.90, abs(lat)));
+    col = mix(col, vec3(0.92, 0.94, 0.98), smoothstep(0.60, 0.84, cloud) * 0.5);
+    float lit = 0.42 + 0.58 * clamp(nrm.z, 0.0, 1.0);
+    col *= lit;
+    vec3 limb = vec3(0.30, 0.55, 1.0) * smoothstep(0.0, 0.07, R - d) * 0.45;
+    col += limb * inside;
+    return col * inside;
   }
 
   void main() {
@@ -443,11 +563,27 @@ export const ledFragment = /* glsl */ `
     float edge = smoothstep(0.0, 0.12, cuv.x) * smoothstep(0.0, 0.12, cuv.y)
                * smoothstep(1.0, 0.88, cuv.x) * smoothstep(1.0, 0.88, cuv.y);
 
-    vec3 colA = colorFor(uModeA, content(uModeA, uShapeA, cc), cc);
-    vec3 colB = colorFor(uModeB, content(uModeB, uShapeB, cc), cc);
-    vec3 outCol = mix(colA, colB, uBlend) * edge * uIntensity;
-    outCol += vec3(0.05) * uBeat * edge;
-    gl_FragColor = vec4(outCol * uWall, 1.0);
+    float lumA = content(uModeA, uShapeA, cc);
+    float lumB = content(uModeB, uShapeB, cc);
+    vec3 colA = colorFor(uModeA, lumA, cc);
+    vec3 colB = colorFor(uModeB, lumB, cc);
+    vec3 specCol = mix(colA, colB, uBlend) * edge * uIntensity;
+    float used = smoothstep(0.02, 0.18, mix(lumA, lumB, uBlend));
+    specCol += vec3(0.05) * uBeat * edge * used;
+
+    // Pixel galaxy behind everything, a star in the centre. On a big drop the
+    // star detonates white, then Earth fades in as LED tiles.
+    vec3 cosmos = galaxyPixel(cell, cc) + centerStar(cc);
+    cosmos = mix(cosmos, earthPixel(cc), uEarth);
+    vec3 boom = starBurst(cell, cc, max(uBurst, 0.001));
+    cosmos = mix(cosmos, vec3(1.0), clamp(boom * uBurst, 0.0, 1.0));
+    cosmos *= edge * uIntensity * (0.72 + uAmp * 0.22);
+
+    vec3 outCol = mix(cosmos, specCol, used);
+    float rndA = mix(cellAlpha(uModeA, lumA, cell), cellAlpha(uModeB, lumB, cell), uBlend);
+    float alpha = mix(max(rndA, 0.82), 1.0, max(used, max(uBurst, uEarth * 0.7)));
+    alpha *= edge * uWall;
+    gl_FragColor = vec4(outCol * uWall, alpha);
   }
 `;
 

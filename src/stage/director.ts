@@ -13,7 +13,7 @@
  * the drop itself opens with white lasers before settling back to colour.
  */
 import type { GenreId, StageSettings } from '../state/presets';
-import { WALL_SHAPE_COUNT } from '../state/presets';
+import { CUES, WALL_SHAPES, WALL_SHAPE_COUNT } from '../state/presets';
 import { settingsStore } from '../state/settingsStore';
 
 /**
@@ -75,6 +75,16 @@ export type Look =
   | 'focalBeams';
 export type WallContent = 'spectrum' | 'heatmap' | 'shapes' | 'text';
 
+/** One upcoming (or current) director cue, planned ahead of the phrase. */
+export interface CueQueueItem {
+  look: Look;
+  wallContent: WallContent;
+  shape: number;
+  textIndex: number;
+  label: string;
+  wallLabel: string;
+}
+
 interface Targets {
   wall: number;
   lasers: number;
@@ -124,6 +134,13 @@ export interface DirectorState extends Targets {
   wallContent: WallContent;
   /** index into splitWords(settings.wallText) for the current text phrase */
   textIndex: number;
+  /** current cue, mirrored for the upcoming-queue overlay */
+  now: CueQueueItem;
+  /** user-built upcoming cues. Starts empty; never auto-filled. */
+  queue: CueQueueItem[];
+  beatsInPhrase: number;
+  phraseBeats: number;
+  phraseProgress: number;
   /** slow-moving 0..1 estimate of how loud the track has been lately */
   energy: number;
   /** 0..1 how strongly the track is building right now (rising energy) */
@@ -142,6 +159,11 @@ export interface DirectorState extends Targets {
   white: number;
   /** 1 during the pre-drop blackout beat */
   blackout: number;
+  /**
+   * 0..1 beams-to-crowd canopy: heads lift up and fan wide like a cloud.
+   * Driven by the cue envelope, not a look target.
+   */
+  beamCloud: number;
   /** seconds since the current cue started */
   cueTime: number;
   /** true only on the frame a drop (sudden energy jump) was detected */
@@ -248,12 +270,18 @@ export const director: DirectorState = {
   shape: 0,
   wallContent: 'spectrum',
   textIndex: 0,
+  now: { look: 'wallBeams', wallContent: 'spectrum', shape: 0, textIndex: 0, label: 'Beams', wallLabel: 'Spectrum' },
+  queue: [],
+  beatsInPhrase: 0,
+  phraseBeats: 16,
+  phraseProgress: 0,
   energy: 0,
   build: 0,
   breakdown: false,
   react: 1,
   white: 0,
   blackout: 0,
+  beamCloud: 0,
   cueTime: 0,
   drop: false,
   sinceDrop: 100,
@@ -265,6 +293,12 @@ export const director: DirectorState = {
 
 const BLACKOUT_SECONDS = 0.32;
 const WHITE_OUT_HOLD = 0.5;
+/** Beams-to-crowd: ease to eyes, hold, lift into a cloud, ease back down. */
+const CROWD_IN = 1.5;
+const CROWD_EYES = 1.35;
+const CROWD_UP = 1.8;
+const CROWD_OUT = 2.0;
+const CROWD_GESTURE = CROWD_IN + CROWD_EYES + CROWD_UP + CROWD_OUT;
 
 let beatsInPhrase = 0;
 let phraseStart = 0;
@@ -316,10 +350,127 @@ function pickFocusPoint() {
 
 function pick(list: Look[], avoid: Look): Look {
   const options = list.filter((l) => l !== avoid);
-  return options[Math.floor(Math.random() * options.length)];
+  return options[Math.floor(Math.random() * options.length)] ?? list[0];
 }
 
-function startCue(look: Look, settings: StageSettings) {
+function lookLabel(look: Look): string {
+  return CUES.find((c) => c.id === look)?.label ?? look;
+}
+
+function wallLabelOf(content: WallContent, shape: number, textIndex: number, settings: StageSettings): string {
+  if (content === 'spectrum') return 'Spectrum';
+  if (content === 'heatmap') return 'Heat map';
+  if (content === 'text') {
+    const words = splitWords(settings.wallText);
+    return words[textIndex] ? `“${words[textIndex]}”` : 'Text';
+  }
+  return WALL_SHAPES[shape]?.name ?? 'Shape';
+}
+
+function snapshotNow(look: Look, settings: StageSettings): CueQueueItem {
+  const wallOn = TARGETS[look].wall > 0.3;
+  return {
+    look,
+    wallContent: director.wallContent,
+    shape: director.shape,
+    textIndex: director.textIndex,
+    label: lookLabel(look),
+    wallLabel: wallOn ? wallLabelOf(director.wallContent, director.shape, director.textIndex, settings) : '',
+  };
+}
+
+function planWall(settings: StageSettings, energy: number, prevContent: WallContent): Pick<CueQueueItem, 'wallContent' | 'shape' | 'textIndex'> {
+  const words = splitWords(settings.wallText);
+  const roll = Math.random();
+  if (words.length > 0 && prevContent !== 'text' && roll < 0.3) {
+    return { wallContent: 'text', shape: director.shape, textIndex: Math.floor(Math.random() * words.length) };
+  }
+  if (energy > 0.4 && roll < 0.62) {
+    return { wallContent: prevContent === 'spectrum' ? 'heatmap' : 'spectrum', shape: director.shape, textIndex: 0 };
+  }
+  return {
+    wallContent: 'shapes',
+    shape: (director.shape + 1 + Math.floor(Math.random() * 3)) % WALL_SHAPE_COUNT,
+    textIndex: 0,
+  };
+}
+
+function makeItem(look: Look, settings: StageSettings, prevContent: WallContent, energy: number): CueQueueItem {
+  const wallOn = TARGETS[look].wall > 0.3;
+  const wall = wallOn ? planWall(settings, energy, prevContent) : { wallContent: prevContent, shape: director.shape, textIndex: 0 };
+  return {
+    look,
+    ...wall,
+    label: lookLabel(look),
+    wallLabel: wallOn ? wallLabelOf(wall.wallContent, wall.shape, wall.textIndex, settings) : '',
+  };
+}
+
+function autoNextLook(settings: StageSettings): Look {
+  const profile = profileFor(settings.genre);
+  const prev = director.look;
+  const laserPhrase = prev === 'laserSweep' || prev === 'laserAudience' || prev === 'lasersBeams' || prev === 'laserBorder';
+  if (laserPhrase && settings.rigStyle !== 'festival' && Math.random() < 0.5) return 'laserMesh';
+  if (prev === 'laserMesh' && Math.random() < 0.4) return 'laserSweep';
+  return pick(poolFor(settings.rigStyle, director.energy, profile), prev);
+}
+
+function playQueued(settings: StageSettings) {
+  const next = director.queue.shift();
+  if (next) {
+    startCue(next.look, settings, next);
+    return;
+  }
+  startCue(autoNextLook(settings), settings);
+}
+
+/** Skip the rest of this phrase and play the next user-queued cue now. */
+export function playAhead(): string {
+  if (director.queue.length === 0) return 'Queue empty';
+  const settings = settingsStore.getSettings();
+  if (settings.cue !== 'auto' && settings.cue !== 'whiteOut') {
+    settingsStore.update({ cue: 'auto' }, { preserveShowMode: true });
+  }
+  playQueued(settings);
+  snapCueStart(director.look);
+  return `Now: ${director.now.label}`;
+}
+
+/** Append a cue. First one starts now; the rest follow after a short phrase.
+ *  Laser mesh, sheets and mesh blackout hold like they did before the queue:
+ *  the fans fold in and stay until the operator calls something else.
+ */
+export function enqueueCue(look: Look): string {
+  if (look === 'laserMesh' || look === 'laserSheet' || look === 'meshBlackout') {
+    settingsStore.update({ cue: look }, { preserveShowMode: true });
+    const label = look === 'laserMesh' ? 'Laser mesh' : look === 'laserSheet' ? 'Laser sheets' : 'Mesh blackout';
+    return label;
+  }
+  const settings = settingsStore.getSettings();
+  const item = makeItem(look, settings, director.wallContent, director.energy);
+  const startNow = director.queue.length === 0;
+  director.queue.push(item);
+  if (startNow) {
+    if (settings.cue !== 'auto' && settings.cue !== 'whiteOut') {
+      settingsStore.update({ cue: 'auto' }, { preserveShowMode: true });
+    }
+    playQueued(settings);
+    snapCueStart(director.look);
+    return `Now: ${item.label}`;
+  }
+  return `Queued: ${item.label}`;
+}
+
+export function removeQueued(index: number) {
+  if (index < 0 || index >= director.queue.length) return;
+  director.queue.splice(index, 1);
+}
+
+export function clearQueue() {
+  director.queue.length = 0;
+}
+
+function startCue(look: Look, settings: StageSettings, planned?: CueQueueItem) {
   director.look = look;
   director.cueTime = 0;
   target = TARGETS[look];
@@ -327,6 +478,10 @@ function startCue(look: Look, settings: StageSettings) {
   beatsInPhrase = 0;
   director.laserGroup = pickLaserGroup(settings, director.energy, director.laserGroup);
   if (look === 'focalBeams') pickFocusPoint();
+  if (look === 'beamsAudience') {
+    director.beamAim = 0;
+    director.beamCloud = 0;
+  }
   // Auto palette: a new colour world every second cue, always on a drop
   cuesSincePalette++;
   if (cuesSincePalette >= 2 || look === 'full') {
@@ -334,9 +489,11 @@ function startCue(look: Look, settings: StageSettings) {
     const options = AUTO_PALETTES.filter((p) => p !== director.autoPalette);
     director.autoPalette = options[Math.floor(Math.random() * options.length)];
   }
-  // Wall content: mostly shapes, spectrum on high energy, and every so often
-  // one of the configured words (never two text phrases in a row).
-  if (target.wall > 0.3) {
+  if (planned && target.wall > 0.3) {
+    director.wallContent = planned.wallContent;
+    director.shape = planned.shape;
+    director.textIndex = planned.textIndex;
+  } else if (target.wall > 0.3) {
     wallLooksSeen++;
     const words = splitWords(settings.wallText);
     const roll = Math.random();
@@ -350,6 +507,7 @@ function startCue(look: Look, settings: StageSettings) {
       director.shape = (director.shape + 1 + Math.floor(Math.random() * 3)) % WALL_SHAPE_COUNT;
     }
   }
+  director.now = snapshotNow(look, settings);
 }
 
 /**
@@ -389,6 +547,30 @@ function snapTo(t: Targets) {
   director.pyro = t.pyro;
   director.beamAim = t.beamAim;
   director.laserAim = t.laserAim;
+}
+
+function isLaserFoldLook(look: Look) {
+  return (
+    look === 'laserMesh' ||
+    look === 'laserSheet' ||
+    look === 'laserSweep' ||
+    look === 'laserAudience' ||
+    look === 'laserBorder' ||
+    look === 'lasersBeams' ||
+    look === 'meshBlackout'
+  );
+}
+
+/** Play-now snap. Laser mesh/sheets keep the original slow fold; crowd aim eases. */
+function snapCueStart(look: Look) {
+  if (isLaserFoldLook(look)) return;
+  const prevAim = director.beamAim;
+  const prevCloud = director.beamCloud;
+  snapTo(TARGETS[look]);
+  if (look === 'beamsAudience') {
+    director.beamAim = prevAim;
+    director.beamCloud = prevCloud;
+  }
 }
 
 /** Operator-triggered drop: blackout beat, then everything with white lasers and pyro. */
@@ -477,10 +659,12 @@ export function updateDirector(
     // Operator called a cue: hold it.
     if (director.look !== settings.cue) startCue(settings.cue, settings);
     target = TARGETS[settings.cue];
-  } else if (!settings.autoCues) {
+  } else if (!settings.autoCues && !(director.look === 'beamsAudience' && director.cueTime < CROWD_GESTURE + 0.4)) {
     target = TARGETS.full;
     director.look = 'full';
     director.wallContent = 'spectrum';
+  } else if (!settings.autoCues) {
+    target = TARGETS.beamsAudience;
   } else {
     // Drop: a sudden jump well above the recent average, but only after a real
     // breakdown (a few quiet seconds) and not more than every ~25s. This is the
@@ -516,37 +700,38 @@ export function updateDirector(
 
     // No beat to work with (a speech break, an intro, a quiet interlude):
     // hold a beams-to-crowd look instead of cutting laser cues to a voice.
-    if (speech) {
+    if (speech && director.queue.length === 0) {
       if (director.look !== 'beamsAudience') startCue('beamsAudience', settings);
       target = TARGETS.beamsAudience;
     }
 
     if (audio.beat) beatsInPhrase++;
-    // Slow pacing = longer phrases (32 beats), fast = 16. Fall back to a timer
-    // when no tempo is available. The post-drop "full" look lasts one phrase.
-    // Phrase length from the genre profile; the post-drop payoff holds longer.
-    const phraseBeats =
-      director.look === 'full'
+    // User-queued cues should land quickly — don't wait a full 16/32-beat phrase.
+    // Laser mesh/sheets need the original slow fold, so give them a longer drain.
+    const draining = director.queue.length > 0;
+    const laserFolding = isLaserFoldLook(director.look);
+    const phraseBeats = draining
+      ? laserFolding
+        ? 8
+        : 2
+      : director.look === 'full'
         ? profile.dropHold
         : settings.pacing < 0.5
           ? profile.phraseBeats
           : Math.max(8, profile.phraseBeats / 2);
     const beatMs = audio.bpm > 0 ? 60000 / audio.bpm : 500;
     const haveTempo = audio.bpm > 0 && (audio.bpmConfidence ?? 1) > 0.15;
-    // With a tempo, the bar count decides the phrase and the clock is only a
-    // safety net; without one, fall back to a pacing-based duration.
-    const maxSeconds = (beatMs * phraseBeats * 1.6) / 1000;
-    const minSeconds = haveTempo ? 4 : 8 + (1 - settings.pacing) * 12;
+    const maxSeconds = draining ? (laserFolding ? 5.5 : 2.2) : (beatMs * phraseBeats * 1.6) / 1000;
+    const minSeconds = draining ? (laserFolding ? 4.2 : 0.7) : haveTempo ? 4 : 8 + (1 - settings.pacing) * 12;
     const phraseDone = beatsInPhrase >= phraseBeats || time - phraseStart > maxSeconds;
-    if (!speech && phraseDone && time - phraseStart > minSeconds) {
-      // A laser phrase is followed by the mesh half of the time, so the fans
-      // visibly fold into the lattice (the lasers -> mesh transition).
-      const prev = director.look;
-      const laserPhrase = prev === 'laserSweep' || prev === 'laserAudience' || prev === 'lasersBeams' || prev === 'laserBorder';
-      if (laserPhrase && settings.rigStyle !== 'festival' && Math.random() < 0.5) startCue('laserMesh', settings);
-      else if (prev === 'laserMesh' && Math.random() < 0.4) startCue('laserSweep', settings);
-      else startCue(pick(poolFor(settings.rigStyle, director.energy, profile), prev), settings);
+    const crowdHold = director.look === 'beamsAudience' && director.cueTime < CROWD_GESTURE + 0.4;
+    if (!crowdHold && phraseDone && time - phraseStart > minSeconds && (!speech || draining)) {
+      playQueued(settings);
     }
+    director.beatsInPhrase = beatsInPhrase;
+    director.phraseBeats = phraseBeats;
+    const dur = draining ? (laserFolding ? 4.5 : 2) : haveTempo ? (beatMs * phraseBeats) / 1000 : minSeconds;
+    director.phraseProgress = clamp01(director.cueTime / Math.max(0.5, dur));
     // A hard beat at the top of a build: a half-second white whip, then back.
     if (
       !speech &&
@@ -564,11 +749,9 @@ export function updateDirector(
   director.white *= Math.pow(0.5, dt / 2.5);
   if (director.white < 0.01) director.white = 0;
 
-  // Laser groups change every 8 beats (or ~6-10s without a tempo), independent
-  // of the look, so the source of the beams keeps moving with the music. A big
-  // surge at high energy opens every fixture at once.
+  // Laser groups: operator lock snaps on; auto still crossfades.
   if (settings.laserGroup !== 'auto') {
-    director.laserGroup = settings.laserGroup; // operator override from the keyboard
+    director.laserGroup = settings.laserGroup;
   } else if (settings.cue === 'auto' && settings.autoCues) {
     if (audio.beat) groupBeats++;
     const groupSeconds = 6 + (1 - settings.pacing) * 4;
@@ -579,6 +762,13 @@ export function updateDirector(
     }
     if (director.laserGroup !== 'all' && energyFast > 0.85 && director.energy > 0.6) director.laserGroup = 'all';
   }
+  const gRate = Math.min(1, dt / 1.2);
+  const g = director.laserGroup;
+  director.gTopMid += ((g === 'topMiddle' ? 1 : 0) - director.gTopMid) * gRate;
+  director.gTop += ((g === 'top' ? 1 : 0) - director.gTop) * gRate;
+  director.gBotMid += ((g === 'bottomMiddle' ? 1 : 0) - director.gBotMid) * gRate;
+  director.gBottom += ((g === 'bottom' ? 1 : 0) - director.gBottom) * gRate;
+  director.gAll += ((g === 'all' ? 1 : 0) - director.gAll) * gRate;
   // Beam banks: operator lock, otherwise swap on their own clock so the
   // side towers trade with the overhead row.
   if (director.look === 'focalBeams' && settings.beamBank === 'auto') {
@@ -597,13 +787,6 @@ export function updateDirector(
     }
     if (director.beamBank !== 'all' && energyFast > 0.85 && director.energy > 0.6) director.beamBank = 'all';
   }
-  const gRate = Math.min(1, dt / 1.2);
-  const g = director.laserGroup;
-  director.gTopMid += ((g === 'topMiddle' ? 1 : 0) - director.gTopMid) * gRate;
-  director.gTop += ((g === 'top' ? 1 : 0) - director.gTop) * gRate;
-  director.gBotMid += ((g === 'bottomMiddle' ? 1 : 0) - director.gBotMid) * gRate;
-  director.gBottom += ((g === 'bottom' ? 1 : 0) - director.gBottom) * gRate;
-  director.gAll += ((g === 'all' ? 1 : 0) - director.gAll) * gRate;
   const bank = director.beamBank;
   const bankRate = director.look === 'focalBeams' ? Math.min(1, dt / 0.1) : gRate;
   director.bTruss += ((bank === 'truss' || bank === 'all' ? 1 : 0) - director.bTruss) * bankRate;
@@ -627,8 +810,36 @@ export function updateDirector(
   director.strobe += (target.strobe - director.strobe) * rate;
   director.pyro += (target.pyro - director.pyro) * rate;
   const bursting = time < whiteOutUntil;
-  const beamAimTarget = bursting ? Math.max(target.beamAim, 0.85) : target.beamAim;
-  director.beamAim += (beamAimTarget - director.beamAim) * (bursting ? Math.min(1, dt / 0.12) : rate);
+  if (director.look === 'beamsAudience' && !bursting) {
+    // Ease into the eyes, hold, lift into a wide cloud, then drop back down.
+    const t = director.cueTime;
+    const smooth = (x: number) => {
+      const u = Math.max(0, Math.min(1, x));
+      return u * u * (3 - 2 * u);
+    };
+    if (t < CROWD_IN) {
+      director.beamAim = smooth(t / CROWD_IN);
+      director.beamCloud = 0;
+    } else if (t < CROWD_IN + CROWD_EYES) {
+      director.beamAim = 1;
+      director.beamCloud = 0;
+    } else if (t < CROWD_IN + CROWD_EYES + CROWD_UP) {
+      const u = smooth((t - CROWD_IN - CROWD_EYES) / CROWD_UP);
+      director.beamAim = 1 - u;
+      director.beamCloud = u;
+    } else if (t < CROWD_GESTURE) {
+      const u = smooth((t - CROWD_IN - CROWD_EYES - CROWD_UP) / CROWD_OUT);
+      director.beamAim = 0;
+      director.beamCloud = 1 - u;
+    } else {
+      director.beamAim = 0;
+      director.beamCloud = 0;
+    }
+  } else {
+    const beamAimTarget = bursting ? Math.max(target.beamAim, 0.85) : target.beamAim;
+    director.beamAim += (beamAimTarget - director.beamAim) * (bursting ? Math.min(1, dt / 0.12) : rate);
+    director.beamCloud += (0 - director.beamCloud) * rate;
+  }
   director.laserAim += (target.laserAim - director.laserAim) * rate;
   // Flash holds 0.5s at full, then dumps in ~120ms. A keyboard bump still slams.
   const washTarget = settings.washEnabled ? Math.max(target.wash, settings.washBump ? 1 : 0, bursting ? 1 : 0) : 0;

@@ -18,7 +18,7 @@ import { Slider } from './Slider';
 import { theme } from './theme';
 import { KEYMAP, describeKey } from './keymap';
 import { RECORD_QUALITIES } from './recorder';
-import { triggerWhiteOut } from '../stage/director';
+import { enqueueCue, triggerWhiteOut, type Look } from '../stage/director';
 
 const MODES: { id: ShowMode; label: string; blurb: string }[] = [
   { id: 'chill', label: 'Chill', blurb: 'Slow sweeps, no strobes' },
@@ -152,7 +152,11 @@ export function SettingsPanel() {
           {CUES.map((c) => (
             <Pressable
               key={c.id}
-              onPress={() => (c.id === 'whiteOut' ? triggerWhiteOut() : set({ cue: c.id }))}
+              onPress={() => {
+                if (c.id === 'whiteOut') triggerWhiteOut();
+                else if (c.id === 'auto') set({ cue: 'auto' });
+                else enqueueCue(c.id as Look);
+              }}
               style={[styles.paletteChip, s.cue === c.id && styles.chipActive]}
             >
               <Text style={styles.chipTitle}>{c.label}</Text>
@@ -301,6 +305,13 @@ export function SettingsPanel() {
           ))}
         </View>
         <Slider label="Moving heads" value={s.beamCount} min={4} max={24} step={1} onChange={(v) => set({ beamCount: v })} />
+        <Slider
+          label="Side beam aperture"
+          value={s.sideBeamAperture ?? 0.5}
+          onChange={(v) => set({ sideBeamAperture: v })}
+          format={(v) => (v < 0.33 ? 'Tight' : v < 0.66 ? 'Medium' : 'Wide')}
+        />
+        <Text style={[styles.note, { marginBottom: 8 }]}>How wide the side-tower shafts open. Overhead truss cones stay as they are.</Text>
       </Section>
 
       <Section title="Elements">

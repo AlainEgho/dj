@@ -4,10 +4,9 @@
  * returns a short label for the on-screen toast.
  */
 import { CUES, GENRES, LASER_COLORS, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } from '../state/presets';
-import { director } from '../stage/director';
 import { PALETTES } from '../state/palettes';
+import { director, enqueueCue, playAhead, triggerDrop, triggerWhiteOut, type Look } from '../stage/director';
 import { settingsStore } from '../state/settingsStore';
-import { triggerDrop, triggerWhiteOut } from '../stage/director';
 import { toggleRecording } from './recorder';
 
 const PALETTES_ORDER = PALETTES.map((p) => p.id);
@@ -50,15 +49,18 @@ const cycle =
 const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '`', '[', ']'];
 const cueBindings: KeyBinding[] = CUES.filter((_, i) => cueKeys[i] !== undefined).map((c, i) => ({
   key: cueKeys[i],
-  label: c.label,
+  label: c.id === 'auto' ? c.label : c.id === 'whiteOut' ? c.label : `Queue ${c.label}`,
   group: 'Cues',
   run: () => {
     if (c.id === 'whiteOut') {
       triggerWhiteOut();
       return 'WHITE OUT';
     }
-    set({ cue: c.id });
-    return `Cue: ${c.label}`;
+    if (c.id === 'auto') {
+      set({ cue: 'auto' });
+      return 'Cue: Auto';
+    }
+    return enqueueCue(c.id as Look);
   },
 }));
 
@@ -258,6 +260,7 @@ export const KEYMAP: KeyBinding[] = [
     },
   },
   { key: 'q', label: 'Record / stop recording (video + sound)', group: 'Live', run: () => toggleRecording() },
+  { key: 'Tab', label: 'Play next queued cue now', group: 'Live', run: () => playAhead() },
   { key: 'f', label: 'Fullscreen (browser)', group: 'Live', run: () => '' },
   { key: '?', label: 'Show / hide this key map', group: 'Live', run: () => '' },
 ];

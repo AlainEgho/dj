@@ -8,6 +8,13 @@ import type { AudioSourceKind } from './types';
 
 const hasWindow = typeof window !== 'undefined' && typeof navigator !== 'undefined';
 
+function isMacWeb() {
+  if (!hasWindow) return false;
+  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = nav.userAgentData?.platform || nav.platform || '';
+  return /Mac|iPhone|iPad/.test(platform) || /Mac OS X/.test(nav.userAgent);
+}
+
 class WebAudioEngine implements AudioEngine {
   readonly capabilities: EngineCapabilities;
   source: AudioSourceKind = 'none';
@@ -17,6 +24,9 @@ class WebAudioEngine implements AudioEngine {
   private analyser: AnalyserNode | null = null;
   private stream: MediaStream | null = null;
   private streamNode: MediaStreamAudioSourceNode | null = null;
+  /** Full getDisplayMedia stream. Video must stay alive on macOS or audio dies. */
+  private displayStream: MediaStream | null = null;
+  private keepAliveVideo: HTMLVideoElement | null = null;
 
   // file playback
   private buffer: AudioBuffer | null = null;
@@ -61,11 +71,57 @@ class WebAudioEngine implements AudioEngine {
     this.stopBufferSource();
     this.streamNode?.disconnect();
     this.streamNode = null;
-    this.stream?.getTracks().forEach((t) => t.stop());
+    const display = this.displayStream;
+    const stream = this.stream;
+    this.displayStream = null;
     this.stream = null;
+    display?.getTracks().forEach((t) => t.stop());
+    stream?.getTracks().forEach((t) => t.stop());
+    this.releaseKeepAliveVideo();
     this.buffer = null;
     this.playing = false;
     this.source = 'none';
+  }
+
+  private releaseKeepAliveVideo() {
+    if (!this.keepAliveVideo) return;
+    this.keepAliveVideo.pause();
+    this.keepAliveVideo.srcObject = null;
+    this.keepAliveVideo.remove();
+    this.keepAliveVideo = null;
+  }
+
+  /**
+   * Chrome on macOS ties tab/system audio to the video capture session.
+   * Stopping the video track (the old approach) works on Windows and kills
+   * audio on Mac. Keep a hidden <video> playing so the session stays open.
+   */
+  private retainDisplayVideo(stream: MediaStream) {
+    const videoTracks = stream.getVideoTracks();
+    if (!videoTracks.length || typeof document === 'undefined') return;
+    this.releaseKeepAliveVideo();
+    const el = document.createElement('video');
+    el.muted = true;
+    el.defaultMuted = true;
+    el.playsInline = true;
+    el.autoplay = true;
+    el.setAttribute('aria-hidden', 'true');
+    el.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;bottom:0;left:0;z-index:-1';
+    el.srcObject = new MediaStream(videoTracks);
+    document.body.appendChild(el);
+    void el.play().catch(() => {});
+    this.keepAliveVideo = el;
+  }
+
+  private watchCaptureEnded(stream: MediaStream) {
+    stream.getTracks().forEach((t) => {
+      t.addEventListener('ended', () => {
+        if (this.displayStream === stream || this.stream === stream) {
+          void this.teardownSource();
+          this.onEvent?.('stopped');
+        }
+      });
+    });
   }
 
   private attachStream(stream: MediaStream, kind: AudioSourceKind) {
@@ -74,15 +130,7 @@ class WebAudioEngine implements AudioEngine {
     this.streamNode = ctx.createMediaStreamSource(stream);
     this.streamNode.connect(analyser);
     this.source = kind;
-    // If the user stops sharing from the browser UI, reflect it in state
-    stream.getAudioTracks().forEach((t) => {
-      t.addEventListener('ended', () => {
-        if (this.stream === stream) {
-          void this.teardownSource();
-          this.onEvent?.('stopped');
-        }
-      });
-    });
+    this.watchCaptureEnded(stream);
     this.onEvent?.('state');
   }
 
@@ -97,12 +145,35 @@ class WebAudioEngine implements AudioEngine {
 
   async startSystemAudio() {
     await this.teardownSource();
-    // getDisplayMedia requires video: true in most browsers; we drop the video track.
-    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true } as DisplayMediaStreamOptions);
-    stream.getVideoTracks().forEach((t) => t.stop());
+    // getDisplayMedia requires a video track. On Windows, system audio is a
+    // separate loopback and survives stopping video. On macOS it does not.
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 1, width: 16, height: 16 },
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        suppressLocalAudioPlayback: false,
+      },
+      // Chrome 141+ / macOS 14.2+: offer "Share system audio" for screen/window.
+      systemAudio: 'include',
+      windowAudio: 'system',
+      selfBrowserSurface: 'exclude',
+      surfaceSwitching: 'include',
+      monitorTypeSurfaces: 'include',
+    } as DisplayMediaStreamOptions);
+
+    this.displayStream = stream;
+    this.retainDisplayVideo(stream);
+    this.watchCaptureEnded(stream);
+
     if (stream.getAudioTracks().length === 0) {
-      stream.getTracks().forEach((t) => t.stop());
-      throw new Error('No audio track shared. Tick "Share audio" in the browser dialog.');
+      await this.teardownSource();
+      throw new Error(
+        isMacWeb()
+          ? 'No audio track. On Mac use Chrome: pick Entire Screen or a window and enable “Share system audio” (Chrome 141+). Older Chrome only captures audio from a Chrome tab (“Share tab audio”). Safari cannot capture system audio.'
+          : 'No audio track shared. Tick “Share audio” / “Share system audio” in the browser dialog.',
+      );
     }
     const audioOnly = new MediaStream(stream.getAudioTracks());
     this.attachStream(audioOnly, 'system');

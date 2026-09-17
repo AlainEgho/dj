@@ -134,6 +134,8 @@ export interface StageSettings {
   /** green = classic 532nm, palette = follow the colour engine, mixed = alternate */
   laserColor: LaserColorId;
   beamCount: number; // 4..24
+  /** 0..1 side-tower cone width (0 = tight shaft, 1 = wide wash) */
+  sideBeamAperture: number;
   strobeEnabled: boolean;
   /** white wash: floods the stage in bright white light */
   washEnabled: boolean;
@@ -201,6 +203,7 @@ export const DEFAULT_SETTINGS: StageSettings = {
   laserDensity: 0.6,
   laserColor: 'mixed',
   beamCount: 12,
+  sideBeamAperture: 0.5,
   strobeEnabled: true,
   washEnabled: true,
   washBump: false,
