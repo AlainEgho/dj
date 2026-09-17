@@ -47,7 +47,7 @@ const cycle =
 
 // One key per cue. Cues without a key here are still available from Settings;
 // they simply get no binding (rather than an undefined one).
-const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '`', '['];
+const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '`', '[', ']'];
 const cueBindings: KeyBinding[] = CUES.filter((_, i) => cueKeys[i] !== undefined).map((c, i) => ({
   key: cueKeys[i],
   label: c.label,

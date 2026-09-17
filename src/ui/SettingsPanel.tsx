@@ -248,6 +248,23 @@ export function SettingsPanel() {
           }
         />
         <Slider
+          label="Beam stroboscope"
+          value={s.beamStrobe}
+          onChange={(v) => set({ beamStrobe: v })}
+          format={(v) =>
+            v < 0.02 ? 'Off (steady)' : v < 0.33 ? 'On the beat' : v < 0.66 ? 'Eighth notes' : 'Hard (16ths)'
+          }
+        />
+        <Slider
+          label="Beam chase"
+          value={s.beamChase}
+          onChange={(v) => set({ beamChase: v })}
+          format={(v) => (v < 0.02 ? 'Off (all together)' : v < 0.5 ? 'Soft step' : v < 0.85 ? 'One at a time' : 'Hard chase')}
+        />
+        <Text style={[styles.note, { marginBottom: 8 }]}>
+          Beam stroboscope chops the moving heads with the kick. Beam chase lights them one after another, one step per beat.
+        </Text>
+        <Slider
           label="Mirror chase"
           value={s.mirrorChase}
           onChange={(v) => set({ mirrorChase: v })}

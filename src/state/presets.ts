@@ -16,7 +16,8 @@ export type CueId =
   | 'festival'
   | 'lasersBeams'
   | 'whiteOut'
-  | 'full';
+  | 'full'
+  | 'focalBeams';
 
 export const CUES: { id: CueId; label: string }[] = [
   { id: 'auto', label: 'Auto' },
@@ -33,6 +34,7 @@ export const CUES: { id: CueId; label: string }[] = [
   { id: 'whiteOut', label: 'White out' },
   { id: 'full', label: 'Everything' },
   { id: 'laserBorder', label: 'Laser borders' },
+  { id: 'focalBeams', label: 'Focal beams' },
 ];
 
 /**
@@ -154,6 +156,13 @@ export interface StageSettings {
   strobeSensitivity: number;
   /** 0..1 how hard the lasers strobe on the beat (0 = steady beams) */
   laserStrobe: number;
+  /** 0..1 how hard the moving heads strobe on the beat (0 = steady) */
+  beamStrobe: number;
+  /**
+   * Sequential chase: heads light one after another on each beat.
+   * 0 = all on together.
+   */
+  beamChase: number;
   /**
    * Mirrored chase: fixtures switch on and off in symmetric pairs, opening from
    * the centre outward and closing back in, in time with the beat. 0 = off.
@@ -206,6 +215,8 @@ export const DEFAULT_SETTINGS: StageSettings = {
   beamSensitivity: 0.6,
   strobeSensitivity: 0.5,
   laserStrobe: 0.45,
+  beamStrobe: 0,
+  beamChase: 0,
   mirrorChase: 0.6,
   pacing: 0.25,
   autoCues: true,

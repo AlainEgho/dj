@@ -1,21 +1,23 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stage } from '../src/stage/Stage';
 import { ControlBar } from '../src/ui/ControlBar';
 import { StatsOverlay } from '../src/ui/StatsOverlay';
+import { onStageTap } from '../src/ui/chromeBus';
 
 /** Main screen: full-bleed stage with overlay chrome. Tap the stage to hide/show UI. */
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const [chrome, setChrome] = useState(true);
 
+  useEffect(() => onStageTap(() => setChrome((c) => !c)), []);
+
   return (
     <View style={styles.root}>
       <View style={StyleSheet.absoluteFill}>
         <Stage />
       </View>
-      <Pressable style={StyleSheet.absoluteFill} onPress={() => setChrome((c) => !c)} />
       {chrome ? (
         <>
           <View style={[styles.top, { top: insets.top + 12, left: insets.left + 12 }]}>

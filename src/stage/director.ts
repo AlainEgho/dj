@@ -71,7 +71,8 @@ export type Look =
   | 'festival'
   | 'lasersBeams'
   | 'whiteOut'
-  | 'full';
+  | 'full'
+  | 'focalBeams';
 export type WallContent = 'spectrum' | 'heatmap' | 'shapes' | 'text';
 
 interface Targets {
@@ -147,6 +148,11 @@ export interface DirectorState extends Targets {
   drop: boolean;
   /** seconds since the last drop */
   sinceDrop: number;
+  /** 0..1 heads converge on a stage focus point */
+  focus: number;
+  focusX: number;
+  focusY: number;
+  focusZ: number;
 }
 
 /** Split the wall text setting into individual words (comma separated, 13 chars max each). */
@@ -188,22 +194,24 @@ const TARGETS: Record<Look, Targets> = {
   // white out is a 0.5s overlay, not a held look; this target is unused
   whiteOut: T(0.15, 0, 0, 0, 0.55, 0.3, 0, 0.9, 0, 1),
   full: T(1, 1, 0, 0, 1, 1, 1, 0.4, 0.6, 0.35),
+  // all heads lock onto a stage-centre focus that jumps between five slots
+  focalBeams: T(0.28, 0, 0, 0, 1, 0.15, 0, 0, 0),
 };
 
 // Arena vocabulary: exclusive looks (Transmission style)
 // 'laserAudience' (fans opening toward the viewer's eyes) is listed more than
 // once so it comes up often.
 const ARENA_LOW: Look[] = ['wall', 'wallBeams', 'laserSweep', 'laserSheet', 'laserAudience', 'laserBorder'];
-const ARENA_MID: Look[] = ['wallBeams', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'laserBorder', 'beamsAudience', 'wall'];
-const ARENA_HIGH: Look[] = ['wallBeams', 'beamsAudience', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'laserBorder', 'meshBlackout'];
+const ARENA_MID: Look[] = ['wallBeams', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'laserBorder', 'beamsAudience', 'focalBeams', 'wall'];
+const ARENA_HIGH: Look[] = ['wallBeams', 'beamsAudience', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'laserBorder', 'focalBeams', 'meshBlackout'];
 // Festival vocabulary: the original combined looks
 const FEST_LOW: Look[] = ['wall', 'wallBeams', 'festival', 'laserAudience'];
-const FEST_MID: Look[] = ['festival', 'wallBeams', 'lasersBeams', 'laserSweep', 'laserAudience', 'laserBorder'];
-const FEST_HIGH: Look[] = ['festival', 'lasersBeams', 'laserMesh', 'wallBeams', 'laserSweep', 'laserAudience', 'laserBorder'];
+const FEST_MID: Look[] = ['festival', 'wallBeams', 'lasersBeams', 'laserSweep', 'laserAudience', 'laserBorder', 'focalBeams'];
+const FEST_HIGH: Look[] = ['festival', 'lasersBeams', 'laserMesh', 'wallBeams', 'laserSweep', 'laserAudience', 'laserBorder', 'focalBeams'];
 
 /** Looks the genre leans on, repeated to weight the random pick. */
 const LASER_LOOKS: Look[] = ['laserSweep', 'laserAudience', 'laserMesh', 'laserSheet', 'laserBorder'];
-const STROBE_LOOKS: Look[] = ['wallBeams', 'beamsAudience', 'wall', 'festival'];
+const STROBE_LOOKS: Look[] = ['wallBeams', 'beamsAudience', 'wall', 'festival', 'focalBeams'];
 
 function poolFor(style: StageSettings['rigStyle'], energy: number, profile: GenreProfile): Look[] {
   const arena = energy < 0.3 ? ARENA_LOW : energy < 0.62 ? ARENA_MID : ARENA_HIGH;
@@ -249,6 +257,10 @@ export const director: DirectorState = {
   cueTime: 0,
   drop: false,
   sinceDrop: 100,
+  focus: 0,
+  focusX: 0,
+  focusY: 5.2,
+  focusZ: 2,
 };
 
 const BLACKOUT_SECONDS = 0.32;
@@ -274,6 +286,33 @@ let blackoutUntil = -1;
 let pendingDrop = false;
 let whiteOutUntil = -1;
 let lastAutoWhite = -10;
+let focusSlot = -1;
+let focusBeats = 0;
+let focusStart = 0;
+let focusSideUntil = -1;
+const FOCUS_SIDE_HOLD = 0.5;
+
+/** Stage-centre aim slots the focal cue lands on. */
+const FOCUS_POINTS: { x: number; y: number; z: number }[] = [
+  { x: 0, y: 7.3, z: 0.4 }, // center up
+  { x: 0, y: 5.2, z: 1.8 }, // middle up
+  { x: 0, y: 1.7, z: 2.2 }, // middle down
+  { x: -5.8, y: 3.6, z: 1.8 }, // middle left
+  { x: 5.8, y: 3.6, z: 1.8 }, // middle right
+];
+
+function pickFocusPoint() {
+  let next = Math.floor(Math.random() * FOCUS_POINTS.length);
+  if (FOCUS_POINTS.length > 1 && next === focusSlot) next = (next + 1 + Math.floor(Math.random() * (FOCUS_POINTS.length - 1))) % FOCUS_POINTS.length;
+  focusSlot = next;
+  const p = FOCUS_POINTS[next];
+  director.focusX = p.x + (Math.random() - 0.5) * 1.1;
+  director.focusY = p.y + (Math.random() - 0.5) * 0.6;
+  director.focusZ = p.z + (Math.random() - 0.5) * 0.8;
+  focusBeats = 0;
+  focusStart = time;
+  focusSideUntil = time + FOCUS_SIDE_HOLD;
+}
 
 function pick(list: Look[], avoid: Look): Look {
   const options = list.filter((l) => l !== avoid);
@@ -287,6 +326,7 @@ function startCue(look: Look, settings: StageSettings) {
   phraseStart = time;
   beatsInPhrase = 0;
   director.laserGroup = pickLaserGroup(settings, director.energy, director.laserGroup);
+  if (look === 'focalBeams') pickFocusPoint();
   // Auto palette: a new colour world every second cue, always on a drop
   cuesSincePalette++;
   if (cuesSincePalette >= 2 || look === 'full') {
@@ -303,7 +343,7 @@ function startCue(look: Look, settings: StageSettings) {
     if (words.length > 0 && director.wallContent !== 'text' && roll < 0.3) {
       director.wallContent = 'text';
       director.textIndex = Math.floor(Math.random() * words.length);
-    } else if (director.energy > 0.7 && roll < 0.55) {
+    } else if (director.energy > 0.4 && roll < 0.62) {
       director.wallContent = director.wallContent === 'spectrum' ? 'heatmap' : 'spectrum';
     } else {
       director.wallContent = 'shapes';
@@ -541,7 +581,11 @@ export function updateDirector(
   }
   // Beam banks: operator lock, otherwise swap on their own clock so the
   // side towers trade with the overhead row.
-  if (settings.beamBank !== 'auto') {
+  if (director.look === 'focalBeams' && settings.beamBank === 'auto') {
+    director.beamBank = time < focusSideUntil ? 'side' : 'truss';
+    if (audio.beat) focusBeats++;
+    if (focusBeats >= 8 || time - focusStart > 5.5) pickFocusPoint();
+  } else if (settings.beamBank !== 'auto') {
     director.beamBank = settings.beamBank;
   } else if (settings.cue === 'auto' && settings.autoCues) {
     if (audio.beat) beamBankBeats++;
@@ -561,8 +605,9 @@ export function updateDirector(
   director.gBottom += ((g === 'bottom' ? 1 : 0) - director.gBottom) * gRate;
   director.gAll += ((g === 'all' ? 1 : 0) - director.gAll) * gRate;
   const bank = director.beamBank;
-  director.bTruss += ((bank === 'truss' || bank === 'all' ? 1 : 0) - director.bTruss) * gRate;
-  director.bSide += ((bank === 'side' || bank === 'all' ? 1 : 0) - director.bSide) * gRate;
+  const bankRate = director.look === 'focalBeams' ? Math.min(1, dt / 0.1) : gRate;
+  director.bTruss += ((bank === 'truss' || bank === 'all' ? 1 : 0) - director.bTruss) * bankRate;
+  director.bSide += ((bank === 'side' || bank === 'all' ? 1 : 0) - director.bSide) * bankRate;
 
   // In a breakdown the wall carries the moment and the lasers rest, so the
   // build and the drop land that much harder (classic trance staging).
@@ -591,4 +636,6 @@ export function updateDirector(
   director.wash += (washTarget - director.wash) * washRate;
   const flashTarget = bursting ? 1 : 0;
   director.whiteFlash += (flashTarget - director.whiteFlash) * (bursting ? Math.min(1, dt / 0.04) : Math.min(1, dt / 0.12));
+  const focusTarget = director.look === 'focalBeams' ? 1 : 0;
+  director.focus += (focusTarget - director.focus) * Math.min(1, dt / 1.4);
 }

@@ -184,23 +184,21 @@ export const ledFragment = /* glsl */ `
   float spectrumContent(vec2 cc) {
     vec2 cell = floor(cc * uGrid);
     float sx = abs(cc.x - 0.5) * 2.0;
-    float spec = texture2D(uSpectrum, vec2(pow(sx, 1.6), 0.5)).r;
-    float bar = step(cc.y + 0.02, spec * (0.7 + uAmp * 0.6));
-    // Bars are not solid blocks: each LED inside flashes on and off at random,
-    // denser near the bottom of the bar, so the meter reads as living pixels.
-    float tick = floor(uTime * 9.0);
+    float spec = pow(texture2D(uSpectrum, vec2(pow(sx, 1.35), 0.5)).r, 0.75);
+    float fallback = (uBass * 0.22 + uAmp * 0.12) * (1.0 - sx * 0.75);
+    float height = max(spec * (0.7 + uAmp * 0.22 + uBeat * 0.08), fallback);
+    float bar = step(cc.y, height);
+    // solid body; only the top of each column flickers
+    float head = smoothstep(height - 0.1, height, cc.y);
+    float tick = floor(uTime * 14.0);
     float r1 = hash2(cell + tick * 0.37);
-    float keep = 0.45 + (1.0 - cc.y) * 0.4;
-    bar *= step(1.0 - keep, r1);
-    // sparse twinkles across the whole wall, more with the level
+    bar *= mix(1.0, step(0.28, r1), head);
     float r2 = hash2(cell * 1.7 + floor(uTime * 12.0) * 0.61);
-    float sparkle = step(0.992 - uAmp * 0.012, r2) * 0.8;
-    // soft cloud bed behind the bars
+    float sparkle = step(0.988 - uAmp * 0.016, r2) * 0.75;
     vec2 p = (cc - 0.5) * vec2(2.0, 1.0);
-    float cloud = clouds(p, uTime * uPace, uAmp) * 0.35;
-    float d = distance(cc, vec2(0.5, 0.35));
-    float ripple = sin(d * 14.0 - uTime * 2.5 * uPace) * 0.5 + 0.5;
-    ripple = pow(ripple, 5.0) * uBass * 0.7;
+    float cloud = clouds(p, uTime * uPace, uAmp) * 0.22;
+    float d = distance(cc, vec2(0.5, 0.28));
+    float ripple = pow(sin(d * 14.0 - uTime * 2.5 * uPace) * 0.5 + 0.5, 5.0) * uBass * 0.55;
     return max(max(bar, ripple), max(sparkle, cloud));
   }
 
@@ -425,16 +423,17 @@ export const ledFragment = /* glsl */ `
       vec3 bg = vec3(0.02, 0.0, 0.03);
       return mix(bg, heat, smoothstep(0.02, 0.15, lum)) * (0.8 + lum * 0.9);
     }
-    // spectrum is fully saturated; shapes and text lean cinematic / desaturated
+    // spectrum stays saturated but dimmer than shapes/text
     float sat = uSat * (mode < 0.5 ? 1.0 : 0.55);
-    float light = mode < 0.5 ? 0.55 : 0.72;
+    float light = mode < 0.5 ? 0.5 : 0.72;
     float d = distance(cc, vec2(0.5));
     float hue = uHue + cc.y * 0.06 + d * 0.04;
     vec3 col = hsl2rgb(vec3(fract(hue), sat, light));
     vec3 bg = hsl2rgb(vec3(fract(uHue + 0.08), uSat * 0.6, 0.05));
-    float flash = uBeat * 0.25 * step(mode, 0.5);
+    float flash = uBeat * 0.1 * step(mode, 0.5);
     lum = clamp(lum + flash, 0.0, 1.0);
-    return mix(bg, col, lum) * (0.7 + lum * 1.1);
+    float lift = mode < 0.5 ? 0.45 + lum * 0.65 : 0.7 + lum * 1.1;
+    return mix(bg, col, lum) * lift;
   }
 
   void main() {

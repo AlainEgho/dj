@@ -57,6 +57,8 @@ export function LEDBackdrop() {
     t.magFilter = THREE.LinearFilter;
     t.minFilter = THREE.LinearFilter;
     t.generateMipmaps = false;
+    t.flipY = false;
+    t.colorSpace = THREE.NoColorSpace;
     t.needsUpdate = true;
     // ring buffer of past spectra for the heat map: one row per HISTORY_INTERVAL
     const hd = new Uint8Array(BINS * HISTORY_ROWS * 4);
@@ -65,6 +67,8 @@ export function LEDBackdrop() {
     ht.minFilter = THREE.LinearFilter;
     ht.wrapT = THREE.RepeatWrapping;
     ht.generateMipmaps = false;
+    ht.flipY = false;
+    ht.colorSpace = THREE.NoColorSpace;
     ht.needsUpdate = true;
     return { spectrumTex: t, spectrumData: d, historyTex: ht, historyData: hd };
   }, []);
@@ -76,6 +80,7 @@ export function LEDBackdrop() {
       new THREE.ShaderMaterial({
         vertexShader: ledVertex,
         fragmentShader: ledFragment,
+        toneMapped: false,
         uniforms: {
           uSpectrum: { value: spectrumTex },
           uHistory: { value: historyTex },
@@ -150,8 +155,9 @@ export function LEDBackdrop() {
 
     const spec = s.audio.spectrum;
     const n = Math.min(BINS, spec.length);
+    const specGain = 0.82 + s.amp * 0.22;
     for (let i = 0; i < n; i++) {
-      const v = Math.min(255, Math.round(Math.pow(spec[i], 0.8) * 255 * s.react));
+      const v = Math.min(255, Math.round(Math.pow(Math.max(0, spec[i]), 0.75) * 255 * specGain));
       const o = i * 4;
       spectrumData[o] = spectrumData[o + 1] = spectrumData[o + 2] = v;
       spectrumData[o + 3] = 255;
@@ -230,10 +236,15 @@ export function LEDBackdrop() {
     u.uAmp.value = s.amp;
     const beat = Number.isFinite(s.beatEnv) ? s.beatEnv : 0;
     u.uBeat.value = beat;
-    // keep a readable floor whenever the director has the wall in at all;
-    // laser looks used to sit at 0.2 and the panel read as off
-    const wallOnStage = director.wall > 0.02 ? Math.max(director.wall, 0.62) : 0;
-    u.uIntensity.value = (0.5 + s.settings.intensity * 0.7) * (1 + beat * 0.2);
+    // Operator wall modes stay up even during laser-only looks. Auto still
+    // follows the director, with a readable floor whenever the wall is in.
+    const forced = s.settings.wallMode !== 'auto' && s.settings.wallMode !== 'off';
+    const wallOnStage = forced
+      ? Math.max(director.wall, 0.88)
+      : director.wall > 0.02
+        ? Math.max(director.wall, 0.62)
+        : 0;
+    u.uIntensity.value = (0.55 + s.settings.intensity * 0.7) * (1 + beat * 0.2);
     u.uWall.value = wallOnStage * (1 - director.blackout);
     u.uHue.value = s.hue;
     u.uSat.value = s.saturation;

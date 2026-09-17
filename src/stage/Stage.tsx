@@ -13,6 +13,7 @@ import { LEDBackdrop } from './LEDBackdrop';
 import { Haze } from './Haze';
 import { Rig } from './Rig';
 import { useRecorder } from '../ui/recorder';
+import { PointerAim } from './pointerAim';
 
 /**
  * Runs first every frame (priority -1): pulls the audio frame, updates the
@@ -80,6 +81,7 @@ export function Stage() {
         }}
       >
         <StageDriver />
+        <PointerAim />
         <RenderScale />
         <Rig />
         <LEDBackdrop />

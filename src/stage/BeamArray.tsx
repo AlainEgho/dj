@@ -5,12 +5,15 @@ import { beamFragment, beamVertex, laserFragment, laserVertex } from './shaders'
 import { director, stage } from './stageState';
 import { useSettings } from '../state/settingsStore';
 import { laserColorFor } from './LaserRig';
+import { pointerAim } from './pointerAim';
 
 const CONE_RADIUS = 1.7;
+const SIDE_CONE_RADIUS = 1.05;
 const BEAM_LENGTH = 22;
 const BORDER_FAN = 26;
 /** Two edge rays sit just outside the cone so they read as its silhouette. */
 const CONE_SPREAD = 2 * Math.atan(CONE_RADIUS / BEAM_LENGTH) * 1.12;
+const SIDE_CONE_SPREAD = 2 * Math.atan(SIDE_CONE_RADIUS / BEAM_LENGTH) * 1.12;
 const TRUSS_Y = 9.4;
 const TRUSS_Z = -2.5;
 /** Inside the FOH frame, on the stage wings — x=12 sat off-screen. */
@@ -30,6 +33,13 @@ interface Head {
   phase: number;
   dir: number;
   seed: number;
+}
+
+function chaseOrder(a: Head, b: Head): number {
+  if (a.bank !== b.bank) return a.bank === 'truss' ? -1 : 1;
+  if (a.bank === 'truss') return a.x - b.x;
+  if (a.side !== b.side) return a.side - b.side;
+  return a.y - b.y;
 }
 
 function buildHeads(count: number): Head[] {
@@ -78,6 +88,7 @@ export function BeamArray() {
   const heads = useMemo(() => buildHeads(count), [count]);
 
   const coneGeo = useMemo(() => new THREE.ConeGeometry(CONE_RADIUS, BEAM_LENGTH, 20, 1, true), []);
+  const sideConeGeo = useMemo(() => new THREE.ConeGeometry(SIDE_CONE_RADIUS, BEAM_LENGTH, 20, 1, true), []);
   const lensGeo = useMemo(() => new THREE.SphereGeometry(0.06, 8, 8), []);
   const sideLensGeo = useMemo(() => new THREE.SphereGeometry(0.13, 10, 10), []);
   const headGeo = useMemo(() => new THREE.BoxGeometry(0.42, 0.28, 0.5), []);
@@ -149,23 +160,30 @@ export function BeamArray() {
   useEffect(
     () => () => {
       coneGeo.dispose();
+      sideConeGeo.dispose();
       lensGeo.dispose();
       sideLensGeo.dispose();
       borderGeo.dispose();
       headGeo.dispose();
       headMat.dispose();
     },
-    [coneGeo, lensGeo, sideLensGeo, borderGeo, headGeo, headMat],
+    [coneGeo, sideConeGeo, lensGeo, sideLensGeo, borderGeo, headGeo, headMat],
   );
 
   const groupRefs = useRef<(THREE.Group | null)[]>([]);
   const borderRefs = useRef<(THREE.Group | null)[]>([]);
   const punch = useRef(0);
+  const followAmt = useRef(0);
+  const chaseStep = useRef(0);
+  const chaseLive = useRef<number[]>([]);
   const scratch = useMemo(
     () => ({
       euler: new THREE.Euler(),
       qSweep: new THREE.Quaternion(),
       qAim: new THREE.Quaternion(),
+      qFocus: new THREE.Quaternion(),
+      qMouse: new THREE.Quaternion(),
+      qMix: new THREE.Quaternion(),
       headPos: new THREE.Vector3(),
       target: new THREE.Vector3(),
       dir: new THREE.Vector3(),
@@ -176,7 +194,11 @@ export function BeamArray() {
 
   useFrame(() => {
     const s = stage;
-    const weight = s.settings.beamsEnabled ? director.beams * (1 - director.blackout) : 0;
+    followAmt.current += ((pointerAim.held ? 1 : 0) - followAmt.current) * Math.min(1, s.dt / 1.15);
+    const follow = followAmt.current;
+    const weight = s.settings.beamsEnabled
+      ? Math.max(director.beams * (1 - director.blackout), follow * 0.75)
+      : 0;
     const borderW = s.settings.lasersEnabled ? director.border * (1 - director.blackout) : 0;
     const enabled = weight > 0.01 || borderW > 0.01;
     const aim = director.beamAim;
@@ -185,13 +207,37 @@ export function BeamArray() {
     const sens = s.settings.beamSensitivity * director.react;
     const laserSens = s.settings.laserSensitivity * director.react;
     const speed = s.pace * (0.2 + s.mid * 0.4 * sens);
-    const { euler, qSweep, qAim, headPos, target, dir, inward } = scratch;
+    const { euler, qSweep, qAim, qFocus, qMouse, qMix, headPos, target, dir, inward } = scratch;
 
     if (s.beat && laserSens > 0.05) punch.current = 1;
+    if (s.beat && s.settings.beamChase > 0.02) chaseStep.current++;
     punch.current *= Math.pow(0.5, s.dt / 0.09);
     const beatHi = Math.max(s.beatEnv, punch.current);
     const strobeAmt = Math.min(1, s.settings.laserStrobe * laserSens + borderW * beatHi * 0.9);
     const bpmNow = s.audio.bpm > 0 ? s.audio.bpm : 128;
+    const beamStrobeAmt = s.settings.beamStrobe * sens;
+    let beamStrobeGate = 1;
+    if (beamStrobeAmt >= 0.02) {
+      if (beamStrobeAmt < 0.33) {
+        beamStrobeGate = 1 - beamStrobeAmt + beamStrobeAmt * Math.min(1, beatHi * 2.4);
+      } else {
+        const beamHz = (bpmNow / 60) * (beamStrobeAmt > 0.66 ? 4 : 2);
+        const beamDuty = 0.82 - beamStrobeAmt * 0.55;
+        beamStrobeGate = (s.time * beamHz) % 1 < beamDuty ? 1 : 1 - beamStrobeAmt;
+      }
+    }
+    const chaseAmt = s.settings.beamChase;
+    const live = chaseLive.current;
+    live.length = 0;
+    if (chaseAmt > 0.02 && enabled) {
+      for (let i = 0; i < heads.length; i++) {
+        const h = heads[i];
+        const bankW = h.bank === 'truss' ? director.bTruss : director.bSide;
+        if (weight * bankW > 0.15) live.push(i);
+      }
+      live.sort((a, b) => chaseOrder(heads[a], heads[b]));
+    }
+    const litIdx = live.length > 0 ? chaseStep.current % live.length : 0;
     const hz = (bpmNow / 60) * (strobeAmt > 0.66 ? 4 : strobeAmt > 0.33 ? 2 : 1);
     const duty = 0.85 - strobeAmt * 0.6;
     const strobeGate = strobeAmt < 0.02 || (s.time * hz) % 1 < duty ? 1 : 1 - strobeAmt;
@@ -225,42 +271,70 @@ export function BeamArray() {
         );
       } else {
         // Left bank yaws toward the right, right toward the left. Slow cosine
-        // throw so the shafts glide across the crowd instead of whipping.
+        // throw so the shafts glide across the crowd; when not in a focal cue
+        // they occasionally open into a wider, faster sweep.
         const towardMiddle = -h.side;
-        const slow = s.time * s.pace * 0.14 + h.phase;
+        const free = Math.max(0, 1 - director.focus);
+        const period = 8.2 + h.seed * 5.4;
+        const cycle = ((s.time * s.pace + h.phase * 1.7) / period) % 1;
+        const occ = cycle < 0.24 ? Math.sin((cycle / 0.24) * Math.PI) : 0;
+        const spin = occ * occ * free;
+        const slow = s.time * s.pace * (0.16 + spin * 0.46) + h.phase;
         const ease = 0.5 - 0.5 * Math.cos(slow);
-        const throwAmt = 0.32 + ease * 0.48;
-        const yaw = towardMiddle * throwAmt;
-        inward.set(Math.sin(yaw), 0.32 + Math.sin(slow * 0.55) * 0.12, Math.cos(yaw));
+        const throwAmt = 0.38 + ease * (0.55 + spin * 0.72);
+        const yaw = towardMiddle * throwAmt + spin * Math.sin(s.time * s.pace * 1.7 + h.phase) * 0.32;
+        const pitch = 0.34 + Math.sin(slow * 0.55) * (0.14 + spin * 0.36);
+        inward.set(Math.sin(yaw), pitch, Math.cos(yaw));
         qSweep.setFromUnitVectors(DOWN, dir.copy(inward).normalize());
         target.copy(camera.position).add(
           dir.set(
-            towardMiddle * (2.8 + ease * 2.4),
-            1.4 + Math.sin(slow * 0.5) * 0.6,
+            towardMiddle * (2.8 + ease * 2.4 + spin * 2.2),
+            1.4 + Math.sin(slow * 0.5) * (0.6 + spin * 0.9),
             2.2,
           ),
         );
       }
       dir.subVectors(target, headPos).normalize();
       qAim.setFromUnitVectors(DOWN, dir);
+      // Audience aim must not freeze the side sweep unless a focal cue is up.
+      const localAim = h.bank === 'side' ? aim * director.focus : aim;
+      qMix.copy(qSweep).slerp(qAim, localAim);
+      if (director.focus > 0.01) {
+        dir.set(director.focusX - headPos.x, director.focusY - headPos.y, director.focusZ - headPos.z).normalize();
+        qFocus.setFromUnitVectors(DOWN, dir);
+        qMix.slerp(qFocus, director.focus);
+      }
+      if (follow > 0.01) {
+        dir.subVectors(pointerAim.point, headPos).normalize();
+        qMouse.setFromUnitVectors(DOWN, dir);
+        qMix.slerp(qMouse, follow);
+      }
+      const slew = h.bank === 'side' && director.focus < 0.2 ? 0.72 : 0.9;
+      g.quaternion.slerp(qMix, Math.min(1, s.dt / slew));
 
-      const qTarget = qSweep.slerp(qAim, aim);
-      if (h.bank === 'side') g.quaternion.slerp(qTarget, Math.min(1, s.dt / 0.55));
-      else g.quaternion.copy(qTarget);
-
+      let chaseGate = 1;
+      if (chaseAmt > 0.02 && live.length > 1) {
+        const pos = live.indexOf(i);
+        chaseGate = pos === litIdx ? 1 : 1 - chaseAmt;
+      }
+      const chop = beamStrobeGate * chaseGate;
       const u = m.uniforms;
       u.uTime.value = s.time;
       const sideBoost = h.bank === 'side' ? 1.45 : 1;
       u.uIntensity.value =
         fixtureW *
         sideBoost *
+        chop *
         s.intensity *
         (1 - sens * 0.55 + s.amp * 0.7 * sens) *
         (1 + s.beatEnv * 0.25 * sens - 0.1) *
         (1 - aim * 0.5);
       (u.uColor.value as THREE.Color).copy(i % 3 === 0 ? s.colorB : i % 3 === 1 ? s.colorA : s.colorC);
       const lens = lensMaterials[i];
-      lens.color.copy(u.uColor.value as THREE.Color).lerp(WHITE, 0.1 + s.beatEnv * 0.3 + aim * 0.5).multiplyScalar(0.5 + fixtureW * 0.5);
+      lens.color
+        .copy(u.uColor.value as THREE.Color)
+        .lerp(WHITE, 0.1 + s.beatEnv * 0.3 + aim * 0.5)
+        .multiplyScalar((0.5 + fixtureW * 0.5) * (0.25 + 0.75 * chop));
 
       const bg = borderRefs.current[i];
       const bm = borderMats[i];
@@ -275,7 +349,7 @@ export function BeamArray() {
       bu.uTreble.value = s.treble * 0.3 * laserSens;
       bu.uBeat.value = beatHi * laserSens;
       bu.uIntensity.value = borderOn * s.settings.intensity * (0.85 + beatHi * 0.45);
-      bu.uSpread.value = CONE_SPREAD;
+      bu.uSpread.value = h.bank === 'side' ? SIDE_CONE_SPREAD : CONE_SPREAD;
       bu.uWidth.value = 0.05 + borderThick * 0.22;
       bu.uSweep.value = 0;
       const col = laserColorFor(bu.uColorA.value as THREE.Color, s.settings.laserColor, i, s.colorA, s.colorB);
@@ -297,7 +371,12 @@ export function BeamArray() {
           {h.bank === 'side' && <mesh geometry={headGeo} material={headMat} position={[0, 0.16, 0]} />}
           <mesh geometry={h.bank === 'side' ? sideLensGeo : lensGeo} material={lensMaterials[i]} />
           {/* cone apex sits at the fixture, opening along local -y */}
-          <mesh geometry={coneGeo} material={materials[i]} position={[0, -BEAM_LENGTH / 2, 0]} frustumCulled={false} />
+          <mesh
+            geometry={h.bank === 'side' ? sideConeGeo : coneGeo}
+            material={materials[i]}
+            position={[0, -BEAM_LENGTH / 2, 0]}
+            frustumCulled={false}
+          />
           {/* two crossed fans: the four generators of the cone, locked to this head */}
           <group
             ref={(el) => {
