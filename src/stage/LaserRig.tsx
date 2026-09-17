@@ -125,6 +125,7 @@ export function LaserRig() {
               uSweep: { value: 0 },
               uFanSize: { value: FAN_SIZE },
               uWidth: { value: 0.045 },
+              uBorder: { value: 0 },
               uColorA: { value: new THREE.Color() },
               uColorB: { value: new THREE.Color() },
             },
@@ -176,7 +177,10 @@ export function LaserRig() {
 
     // Build-ups bring the lasers up gradually even in beam looks; the pre-drop
     // blackout kills everything for a beat.
-    const weight = s.settings.lasersEnabled ? Math.min(1, director.lasers + build * 0.6) * (1 - director.blackout) : 0;
+    // Border look draws its rays on the moving heads, so the floor/truss fans sit out.
+    const weight = s.settings.lasersEnabled
+      ? Math.min(1, director.lasers + build * 0.6) * (1 - director.blackout) * (1 - director.border)
+      : 0;
     const wMesh = director.mesh;
     const wSheet = director.sheet * (1 - wMesh);
     const wAim = director.laserAim * (1 - wMesh - wSheet);
@@ -307,6 +311,7 @@ export function LaserRig() {
       u.uSpread.value = (1.0 * wSweep + 0.7 * wAim) * beatSpread + 0.9 * wMesh + 2.4 * wSheet;
       // sheets use very wide beams so the lines fuse into one solid plane
       u.uWidth.value = 0.045 + wSheet * 1.5 + director.white * 0.02;
+      u.uBorder.value = 0;
       // uSweep rolls the fan about its own axis. With a tempo it rolls steadily,
       // faster on quicker tracks and reversing per fixture so the rig counter-rotates.
       const rollDir = i % 2 === 0 ? 1 : -1;
@@ -355,7 +360,7 @@ const RAINBOW = RAINBOW_ORDER.map((id) => FIXED_COLORS.get(id) ?? WHITE);
  * Colour for fixture `i`: a fixed laser tint, the palette colour, green
  * alternating with the palette, or a different colour per fixture (rainbow).
  */
-function laserColorFor(out: THREE.Color, mode: string, i: number, colorA: THREE.Color, colorB: THREE.Color): THREE.Color {
+export function laserColorFor(out: THREE.Color, mode: string, i: number, colorA: THREE.Color, colorB: THREE.Color): THREE.Color {
   const fixed = FIXED_COLORS.get(mode);
   if (fixed) return out.copy(fixed);
   if (mode === 'rainbow') return out.copy(RAINBOW[i % RAINBOW.length]);

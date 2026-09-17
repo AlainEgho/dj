@@ -31,6 +31,7 @@ export const laserFragment = /* glsl */ `
   uniform float uSweep;    // in-plane rotation of the whole fan
   uniform float uFanSize;  // world size of the quad, for constant-width beams
   uniform float uWidth;    // beam half-width in world units (large = solid sheet)
+  uniform float uBorder;   // 0 = full fan, 1 = only the two outer rays
   uniform vec3 uColorA;
   uniform vec3 uColorB;
 
@@ -49,16 +50,24 @@ export const laserFragment = /* glsl */ `
     float f = fract(k) - 0.5;
     // Beams have a constant world width (a few cm) rather than a constant
     // angle, so they stay solid near the emitter and thin out with distance.
-    float spacingRad = uSpread / uLines;
+    float spacingRad = uSpread / max(uLines, 1.0);
     float halfWidthWorld = uWidth + uBeat * 0.015;
     float thickness = min(0.5, halfWidthWorld / max(0.02, r * uFanSize) / spacingRad);
     float line = smoothstep(thickness, thickness * 0.4, abs(f));
+    float haze = exp(-abs(f) * 16.0) * 0.12;
+    // Border look: only the two outer rays of the fan, same world width so
+    // they stay solid near the emitter and read as the silhouette of a beam.
+    float edgeAng = min(abs(ang + halfSpread), abs(ang - halfSpread));
+    float edgeThick = halfWidthWorld / max(0.02, r * uFanSize);
+    float edgeLine = smoothstep(edgeThick, edgeThick * 0.4, edgeAng);
+    float edgeHaze = exp(-edgeAng / max(0.002, edgeThick) * 0.5) * 0.14;
+    line = mix(line, edgeLine, uBorder);
+    haze = mix(haze, edgeHaze, uBorder);
     // gentle per-line shimmer, stronger with treble
     float flick = 0.88 + 0.12 * sin(uTime * (3.0 + hash(idx) * 6.0) + idx * 3.1);
     flick = mix(1.0, flick, clamp(uTreble, 0.0, 1.0));
     float fade = 1.0 - smoothstep(0.75, 1.0, r);
-    float haze = exp(-abs(f) * 16.0) * 0.12;
-    vec3 col = mix(uColorA, uColorB, fract(idx / uLines + uTime * 0.02));
+    vec3 col = mix(uColorA, uColorB, fract(idx / max(uLines, 1.0) + uTime * 0.02));
     float energy = (line + haze) * flick * fade * uIntensity * (1.0 + uBeat * 0.6);
     gl_FragColor = vec4(col * energy * 2.0, energy);
   }
@@ -438,6 +447,7 @@ export const ledFragment = /* glsl */ `
     vec3 colA = colorFor(uModeA, content(uModeA, uShapeA, cc), cc);
     vec3 colB = colorFor(uModeB, content(uModeB, uShapeB, cc), cc);
     vec3 outCol = mix(colA, colB, uBlend) * edge * uIntensity;
+    outCol += vec3(0.05) * uBeat * edge;
     gl_FragColor = vec4(outCol * uWall, 1.0);
   }
 `;

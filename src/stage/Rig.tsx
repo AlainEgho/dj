@@ -28,6 +28,8 @@ export function Rig() {
     items.push({ pos: [0, 9.85, -2.85], size: [27.5, 0.2, 0.2] });
     // vertical supports at the wall edges so nothing crosses the LED content
     for (const x of [-13.6, 13.6]) items.push({ pos: [x, 5, -2.5], size: [0.35, 10, 0.35] });
+    // side towers on the visible stage wings
+    for (const x of [-8.7, 8.7]) items.push({ pos: [x, 4.0, 3.2], size: [0.42, 8.2, 0.42] });
     // cross braces
     for (let i = 0; i < 12; i++) items.push({ pos: [-11 + i * 2, 9.85, -2.5], size: [0.08, 0.5, 0.5] });
     return items;

@@ -4,9 +4,10 @@
  * returns a short label for the on-screen toast.
  */
 import { CUES, GENRES, LASER_COLORS, RIG_STYLES, WALL_SHAPES, WALL_SHAPE_COUNT, type StageSettings } from '../state/presets';
+import { director } from '../stage/director';
 import { PALETTES } from '../state/palettes';
 import { settingsStore } from '../state/settingsStore';
-import { triggerDrop } from '../stage/director';
+import { triggerDrop, triggerWhiteOut } from '../stage/director';
 import { toggleRecording } from './recorder';
 
 const PALETTES_ORDER = PALETTES.map((p) => p.id);
@@ -16,7 +17,7 @@ export interface KeyBinding {
   shift?: boolean;
   /** what the key does, for the cheat sheet */
   label: string;
-  group: 'Cues' | 'Elements' | 'Laser groups' | 'Wall' | 'Colour' | 'Levels' | 'Live';
+  group: 'Cues' | 'Elements' | 'Laser groups' | 'Beams' | 'Wall' | 'Colour' | 'Levels' | 'Live';
   /** true = keyup matters too (hold behaviour) */
   hold?: boolean;
   run: (down: boolean) => string;
@@ -46,12 +47,16 @@ const cycle =
 
 // One key per cue. Cues without a key here are still available from Settings;
 // they simply get no binding (rather than an undefined one).
-const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '`'];
+const cueKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=', '`', '['];
 const cueBindings: KeyBinding[] = CUES.filter((_, i) => cueKeys[i] !== undefined).map((c, i) => ({
   key: cueKeys[i],
   label: c.label,
   group: 'Cues',
   run: () => {
+    if (c.id === 'whiteOut') {
+      triggerWhiteOut();
+      return 'WHITE OUT';
+    }
     set({ cue: c.id });
     return `Cue: ${c.label}`;
   },
@@ -114,6 +119,20 @@ export const KEYMAP: KeyBinding[] = [
   { key: 'v', label: 'Bottom row lasers', group: 'Laser groups', run: () => (set({ laserGroup: 'bottom' }), 'Lasers: bottom row') },
   { key: 'n', label: 'All lasers', group: 'Laser groups', run: () => (set({ laserGroup: 'all' }), 'Lasers: all') },
   { key: 'g', label: 'Laser group back to auto', group: 'Laser groups', run: () => (set({ laserGroup: 'auto' }), 'Lasers: auto groups') },
+
+  {
+    key: 'y',
+    label: 'Swap beams: overhead / sides',
+    group: 'Beams',
+    run: () => {
+      const cur = get().beamBank;
+      const now = cur === 'side' || (cur === 'auto' && director.bSide > director.bTruss) ? 'truss' : 'side';
+      set({ beamBank: now });
+      return now === 'side' ? 'Beams: sides' : 'Beams: overhead';
+    },
+  },
+  { key: 'y', shift: true, label: 'Both beam banks', group: 'Beams', run: () => (set({ beamBank: 'all' }), 'Beams: both') },
+  { key: ';', label: 'Beam bank back to auto', group: 'Beams', run: () => (set({ beamBank: 'auto' }), 'Beams: auto') },
 
   { key: 'u', label: 'Wall: auto', group: 'Wall', run: () => (set({ wallMode: 'auto' }), 'Wall: auto') },
   { key: 'i', label: 'Wall: spectrum', group: 'Wall', run: () => (set({ wallMode: 'spectrum' }), 'Wall: spectrum') },
@@ -220,12 +239,11 @@ export const KEYMAP: KeyBinding[] = [
   {
     key: 'Enter',
     shift: true,
-    label: 'White out cue (hold the stage in bright white)',
+    label: 'White out flash (0.5s rotating wash)',
     group: 'Live',
     run: () => {
-      const on = get().cue === 'whiteOut';
-      set({ cue: on ? 'auto' : 'whiteOut' });
-      return on ? 'Cue: Auto' : 'WHITE OUT';
+      triggerWhiteOut();
+      return 'WHITE OUT';
     },
   },
   {

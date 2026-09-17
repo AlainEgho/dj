@@ -11,6 +11,7 @@ export type CueId =
   | 'laserAudience'
   | 'laserSheet'
   | 'laserMesh'
+  | 'laserBorder'
   | 'meshBlackout'
   | 'festival'
   | 'lasersBeams'
@@ -31,6 +32,7 @@ export const CUES: { id: CueId; label: string }[] = [
   { id: 'lasersBeams', label: 'Lasers + beams' },
   { id: 'whiteOut', label: 'White out' },
   { id: 'full', label: 'Everything' },
+  { id: 'laserBorder', label: 'Laser borders' },
 ];
 
 /**
@@ -91,6 +93,15 @@ export const RIG_STYLES: { id: RigStyle; label: string }[] = [
   { id: 'mix', label: 'Mix' },
   { id: 'festival', label: 'Festival' },
   { id: 'arena', label: 'Arena' },
+];
+
+/** Which moving-head bank fires. 'auto' lets the director swap overhead / sides. */
+export type BeamBankId = 'auto' | 'truss' | 'side' | 'all';
+export const BEAM_BANKS: { id: BeamBankId; label: string }[] = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'truss', label: 'Overhead' },
+  { id: 'side', label: 'Sides' },
+  { id: 'all', label: 'Both' },
 ];
 
 export const WALL_SHAPES = [
@@ -158,6 +169,8 @@ export interface StageSettings {
   rigStyle: RigStyle;
   /** operator override for which laser fixtures fire, or 'auto' */
   laserGroup: 'auto' | 'topMiddle' | 'top' | 'bottomMiddle' | 'bottom' | 'all';
+  /** operator override for overhead vs side moving heads, or 'auto' */
+  beamBank: BeamBankId;
   /** manual blackout (held from the keyboard) */
   blackout: boolean;
   /** vertical resolution the stage renders at while recording */
@@ -199,6 +212,7 @@ export const DEFAULT_SETTINGS: StageSettings = {
   cue: 'auto',
   rigStyle: 'mix',
   laserGroup: 'auto',
+  beamBank: 'auto',
   blackout: false,
   recordQuality: '1080',
   genre: 'auto',

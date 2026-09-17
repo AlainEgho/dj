@@ -14,6 +14,7 @@
  */
 import type { GenreId, StageSettings } from '../state/presets';
 import { WALL_SHAPE_COUNT } from '../state/presets';
+import { settingsStore } from '../state/settingsStore';
 
 /**
  * Genre profiles. Dance music is built in bars: trance runs long 32-beat
@@ -65,6 +66,7 @@ export type Look =
   | 'laserAudience'
   | 'laserSheet'
   | 'laserMesh'
+  | 'laserBorder'
   | 'meshBlackout'
   | 'festival'
   | 'lasersBeams'
@@ -78,6 +80,8 @@ interface Targets {
   mesh: number;
   /** 1 = fans are dense flat sheets scanning across the crowd */
   sheet: number;
+  /** 1 = only the two outer rays of each fan (border / silhouette look) */
+  border: number;
   beams: number;
   strobe: number;
   pyro: number;
@@ -94,6 +98,8 @@ interface Targets {
  * the floor centre only, the whole floor row, or everything.
  */
 export type LaserGroup = 'topMiddle' | 'top' | 'bottomMiddle' | 'bottom' | 'all';
+/** Overhead truss shafts, side-tower shafts, or both. */
+export type BeamBank = 'truss' | 'side' | 'all';
 
 /** palettes the Auto palette rotates through */
 const AUTO_PALETTES = ['tomorrow', 'ultra', 'oracle', 'sunset', 'acid', 'ice'];
@@ -101,6 +107,7 @@ const AUTO_PALETTES = ['tomorrow', 'ultra', 'oracle', 'sunset', 'acid', 'ice'];
 export interface DirectorState extends Targets {
   look: Look;
   laserGroup: LaserGroup;
+  beamBank: BeamBank;
   /** palette id chosen by the director when the palette setting is 'auto' */
   autoPalette: string;
   /** crossfaded 0..1 weights for each laser group */
@@ -109,6 +116,9 @@ export interface DirectorState extends Targets {
   gBotMid: number;
   gBottom: number;
   gAll: number;
+  /** crossfaded 0..1 weights for the overhead truss vs the side towers */
+  bTruss: number;
+  bSide: number;
   shape: number;
   wallContent: WallContent;
   /** index into splitWords(settings.wallText) for the current text phrase */
@@ -125,6 +135,8 @@ export interface DirectorState extends Targets {
    * the crowd instead of chasing the voice.
    */
   react: number;
+  /** 0..1 short white-out flash (0.5s hold). Wash heads spin while this is up. */
+  whiteFlash: number;
   /** 0..1 white-laser override, high right after a drop */
   white: number;
   /** 1 during the pre-drop blackout beat */
@@ -156,7 +168,8 @@ const T = (
   beamAim: number,
   laserAim: number,
   wash = 0,
-): Targets => ({ wall, lasers, mesh, sheet, beams, strobe, pyro, beamAim, laserAim, wash });
+  border = 0,
+): Targets => ({ wall, lasers, mesh, sheet, border, beams, strobe, pyro, beamAim, laserAim, wash });
 
 const TARGETS: Record<Look, Targets> = {
   wall: T(1, 0, 0, 0, 0.3, 0, 0, 0, 0),
@@ -166,28 +179,30 @@ const TARGETS: Record<Look, Targets> = {
   laserAudience: T(0.2, 1, 0, 0, 0, 0, 0, 0, 1),
   laserSheet: T(0.25, 1, 0, 1, 0, 0, 0, 0, 0),
   laserMesh: T(0.3, 1, 1, 0, 0, 0, 0, 0, 0),
+  // lasers sit on the rim of the moving-head cones; the two fire together
+  laserBorder: T(0.2, 0, 0, 0, 1, 0.25, 0, 0.4, 0, 0, 1),
   meshBlackout: T(0, 1, 1, 0, 0, 0, 0, 0, 0),
   // the original festival rig: wall, beams and lasers running together at moderate levels
   festival: T(0.85, 0.65, 0, 0, 0.8, 0.4, 0.3, 0, 0),
   lasersBeams: T(0.4, 1, 0, 0, 0.6, 0.3, 0, 0, 0),
-  // white out: the whole rig floods white, everything else steps back
-  whiteOut: T(0.15, 0, 0, 0, 0.5, 0.3, 0, 0, 0, 1),
+  // white out is a 0.5s overlay, not a held look; this target is unused
+  whiteOut: T(0.15, 0, 0, 0, 0.55, 0.3, 0, 0.9, 0, 1),
   full: T(1, 1, 0, 0, 1, 1, 1, 0.4, 0.6, 0.35),
 };
 
 // Arena vocabulary: exclusive looks (Transmission style)
 // 'laserAudience' (fans opening toward the viewer's eyes) is listed more than
 // once so it comes up often.
-const ARENA_LOW: Look[] = ['wall', 'wallBeams', 'laserSweep', 'laserSheet', 'laserAudience'];
-const ARENA_MID: Look[] = ['wallBeams', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'beamsAudience', 'wall'];
-const ARENA_HIGH: Look[] = ['wallBeams', 'beamsAudience', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'meshBlackout'];
+const ARENA_LOW: Look[] = ['wall', 'wallBeams', 'laserSweep', 'laserSheet', 'laserAudience', 'laserBorder'];
+const ARENA_MID: Look[] = ['wallBeams', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'laserBorder', 'beamsAudience', 'wall'];
+const ARENA_HIGH: Look[] = ['wallBeams', 'beamsAudience', 'laserSweep', 'laserAudience', 'laserAudience', 'laserSheet', 'laserMesh', 'laserBorder', 'meshBlackout'];
 // Festival vocabulary: the original combined looks
 const FEST_LOW: Look[] = ['wall', 'wallBeams', 'festival', 'laserAudience'];
-const FEST_MID: Look[] = ['festival', 'wallBeams', 'lasersBeams', 'laserSweep', 'laserAudience'];
-const FEST_HIGH: Look[] = ['festival', 'lasersBeams', 'laserMesh', 'wallBeams', 'laserSweep', 'laserAudience'];
+const FEST_MID: Look[] = ['festival', 'wallBeams', 'lasersBeams', 'laserSweep', 'laserAudience', 'laserBorder'];
+const FEST_HIGH: Look[] = ['festival', 'lasersBeams', 'laserMesh', 'wallBeams', 'laserSweep', 'laserAudience', 'laserBorder'];
 
 /** Looks the genre leans on, repeated to weight the random pick. */
-const LASER_LOOKS: Look[] = ['laserSweep', 'laserAudience', 'laserMesh', 'laserSheet'];
+const LASER_LOOKS: Look[] = ['laserSweep', 'laserAudience', 'laserMesh', 'laserSheet', 'laserBorder'];
 const STROBE_LOOKS: Look[] = ['wallBeams', 'beamsAudience', 'wall', 'festival'];
 
 function poolFor(style: StageSettings['rigStyle'], energy: number, profile: GenreProfile): Look[] {
@@ -211,7 +226,11 @@ export const director: DirectorState = {
   look: 'wallBeams',
   ...TARGETS.wallBeams,
   laserGroup: 'all',
+  beamBank: 'truss',
+  bTruss: 1,
+  bSide: 0,
   wash: 0,
+  whiteFlash: 0,
   autoPalette: 'tomorrow',
   gTopMid: 0,
   gTop: 0,
@@ -233,6 +252,7 @@ export const director: DirectorState = {
 };
 
 const BLACKOUT_SECONDS = 0.32;
+const WHITE_OUT_HOLD = 0.5;
 
 let beatsInPhrase = 0;
 let phraseStart = 0;
@@ -244,12 +264,16 @@ let armedUntil = 0;
 let cuesSincePalette = 0;
 let groupBeats = 0;
 let groupStart = 0;
+let beamBankBeats = 0;
+let beamBankStart = 0;
 let wallLooksSeen = 0;
 let target: Targets = TARGETS.wallBeams;
 let time = 0;
 let energyFast = 0;
 let blackoutUntil = -1;
 let pendingDrop = false;
+let whiteOutUntil = -1;
+let lastAutoWhite = -10;
 
 function pick(list: Look[], avoid: Look): Look {
   const options = list.filter((l) => l !== avoid);
@@ -304,11 +328,22 @@ function pickLaserGroup(settings: StageSettings, energy: number, prev: LaserGrou
   return options.length ? options[Math.floor(Math.random() * options.length)] : pool[0];
 }
 
+/**
+ * Overhead truss vs side towers. Quiet/mid phrases swap one bank for the
+ * other; peaks open both. Never repeats the previous bank.
+ */
+function pickBeamBank(energy: number, prev: BeamBank): BeamBank {
+  const pool: BeamBank[] = energy < 0.3 ? ['truss', 'side'] : energy < 0.62 ? ['truss', 'side', 'truss', 'side'] : ['all', 'truss', 'side', 'all'];
+  const options = pool.filter((g) => g !== prev);
+  return options.length ? options[Math.floor(Math.random() * options.length)] : pool[0];
+}
+
 function snapTo(t: Targets) {
   director.wall = t.wall;
   director.lasers = t.lasers;
   director.mesh = t.mesh;
   director.sheet = t.sheet;
+  director.border = t.border;
   director.beams = t.beams;
   director.strobe = t.strobe;
   director.pyro = t.pyro;
@@ -324,6 +359,14 @@ export function triggerDrop() {
   director.blackout = 1;
   director.sinceDrop = 0;
   quietTime = 0;
+}
+
+/** Half-second rotating white flash. Does not steal the current look. */
+export function triggerWhiteOut() {
+  whiteOutUntil = time + WHITE_OUT_HOLD;
+  lastAutoWhite = time;
+  director.wash = 1;
+  director.whiteFlash = 1;
 }
 
 export function updateDirector(
@@ -375,10 +418,22 @@ export function updateDirector(
       snapTo(TARGETS.full); // no crossfade on the drop itself
       director.laserGroup = 'all';
       director.gAll = 1;
+      director.beamBank = 'all';
+      director.bTruss = 1;
+      director.bSide = 1;
+      triggerWhiteOut();
     }
   }
 
-  if (settings.cue !== 'auto') {
+  // White out is a 0.5s rotating flash, not a held look. Selecting the cue
+  // (or Shift+Enter) punches it over whatever is already running, then Auto
+  // takes the cue back so the phrase is not stolen.
+  if (settings.cue === 'whiteOut') {
+    triggerWhiteOut();
+    settingsStore.update({ cue: 'auto' }, { preserveShowMode: true });
+  }
+
+  if (settings.cue !== 'auto' && settings.cue !== 'whiteOut') {
     // Operator called a cue: hold it.
     if (director.look !== settings.cue) startCue(settings.cue, settings);
     target = TARGETS[settings.cue];
@@ -447,10 +502,21 @@ export function updateDirector(
       // A laser phrase is followed by the mesh half of the time, so the fans
       // visibly fold into the lattice (the lasers -> mesh transition).
       const prev = director.look;
-      const laserPhrase = prev === 'laserSweep' || prev === 'laserAudience' || prev === 'lasersBeams';
+      const laserPhrase = prev === 'laserSweep' || prev === 'laserAudience' || prev === 'lasersBeams' || prev === 'laserBorder';
       if (laserPhrase && settings.rigStyle !== 'festival' && Math.random() < 0.5) startCue('laserMesh', settings);
       else if (prev === 'laserMesh' && Math.random() < 0.4) startCue('laserSweep', settings);
       else startCue(pick(poolFor(settings.rigStyle, director.energy, profile), prev), settings);
+    }
+    // A hard beat at the top of a build: a half-second white whip, then back.
+    if (
+      !speech &&
+      audio.beat &&
+      director.build > 0.55 &&
+      energyFast > 0.6 &&
+      time - lastAutoWhite > 8 &&
+      settings.washEnabled
+    ) {
+      triggerWhiteOut();
     }
   }
 
@@ -473,6 +539,20 @@ export function updateDirector(
     }
     if (director.laserGroup !== 'all' && energyFast > 0.85 && director.energy > 0.6) director.laserGroup = 'all';
   }
+  // Beam banks: operator lock, otherwise swap on their own clock so the
+  // side towers trade with the overhead row.
+  if (settings.beamBank !== 'auto') {
+    director.beamBank = settings.beamBank;
+  } else if (settings.cue === 'auto' && settings.autoCues) {
+    if (audio.beat) beamBankBeats++;
+    const bankSeconds = 5 + (1 - settings.pacing) * 4;
+    if (beamBankBeats >= 8 || time - beamBankStart > bankSeconds) {
+      beamBankBeats = 0;
+      beamBankStart = time;
+      director.beamBank = pickBeamBank(director.energy, director.beamBank);
+    }
+    if (director.beamBank !== 'all' && energyFast > 0.85 && director.energy > 0.6) director.beamBank = 'all';
+  }
   const gRate = Math.min(1, dt / 1.2);
   const g = director.laserGroup;
   director.gTopMid += ((g === 'topMiddle' ? 1 : 0) - director.gTopMid) * gRate;
@@ -480,6 +560,9 @@ export function updateDirector(
   director.gBotMid += ((g === 'bottomMiddle' ? 1 : 0) - director.gBotMid) * gRate;
   director.gBottom += ((g === 'bottom' ? 1 : 0) - director.gBottom) * gRate;
   director.gAll += ((g === 'all' ? 1 : 0) - director.gAll) * gRate;
+  const bank = director.beamBank;
+  director.bTruss += ((bank === 'truss' || bank === 'all' ? 1 : 0) - director.bTruss) * gRate;
+  director.bSide += ((bank === 'side' || bank === 'all' ? 1 : 0) - director.bSide) * gRate;
 
   // In a breakdown the wall carries the moment and the lasers rest, so the
   // build and the drop land that much harder (classic trance staging).
@@ -494,13 +577,18 @@ export function updateDirector(
   // the fold from fans into the mesh lattice (and back) is slower and deliberate
   director.mesh += (target.mesh - director.mesh) * Math.min(1, dt / 4.0);
   director.sheet += (target.sheet - director.sheet) * rate;
+  director.border += (target.border - director.border) * rate;
   director.beams += (target.beams - director.beams) * rate;
   director.strobe += (target.strobe - director.strobe) * rate;
   director.pyro += (target.pyro - director.pyro) * rate;
-  director.beamAim += (target.beamAim - director.beamAim) * rate;
+  const bursting = time < whiteOutUntil;
+  const beamAimTarget = bursting ? Math.max(target.beamAim, 0.85) : target.beamAim;
+  director.beamAim += (beamAimTarget - director.beamAim) * (bursting ? Math.min(1, dt / 0.12) : rate);
   director.laserAim += (target.laserAim - director.laserAim) * rate;
-  // The wash snaps up fast (a bump should feel instant) and falls away slowly.
-  const washTarget = settings.washEnabled ? Math.max(target.wash, settings.washBump ? 1 : 0) : 0;
-  const washRate = washTarget > director.wash ? Math.min(1, dt / 0.08) : Math.min(1, dt / 0.55);
+  // Flash holds 0.5s at full, then dumps in ~120ms. A keyboard bump still slams.
+  const washTarget = settings.washEnabled ? Math.max(target.wash, settings.washBump ? 1 : 0, bursting ? 1 : 0) : 0;
+  const washRate = washTarget > director.wash ? Math.min(1, dt / 0.05) : Math.min(1, dt / 0.12);
   director.wash += (washTarget - director.wash) * washRate;
+  const flashTarget = bursting ? 1 : 0;
+  director.whiteFlash += (flashTarget - director.whiteFlash) * (bursting ? Math.min(1, dt / 0.04) : Math.min(1, dt / 0.12));
 }

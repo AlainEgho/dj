@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { PALETTES, hslToHex } from '../state/palettes';
 import {
+  BEAM_BANKS,
   CUES,
   GENRES,
   LASER_COLORS,
@@ -17,6 +18,7 @@ import { Slider } from './Slider';
 import { theme } from './theme';
 import { KEYMAP, describeKey } from './keymap';
 import { RECORD_QUALITIES } from './recorder';
+import { triggerWhiteOut } from '../stage/director';
 
 const MODES: { id: ShowMode; label: string; blurb: string }[] = [
   { id: 'chill', label: 'Chill', blurb: 'Slow sweeps, no strobes' },
@@ -132,12 +134,25 @@ export function SettingsPanel() {
           Festival: lasers on the truss and floor, beams and lasers together. Arena: floor lasers only, one element at a time.
           Mix: both.
         </Text>
+        <Text style={[styles.note, { marginBottom: 6 }]}>Beam bank</Text>
+        <View style={styles.chips}>
+          {BEAM_BANKS.map((b) => (
+            <Pressable
+              key={b.id}
+              onPress={() => set({ beamBank: b.id })}
+              style={[styles.paletteChip, s.beamBank === b.id && styles.chipActive]}
+            >
+              <Text style={styles.chipTitle}>{b.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={[styles.note, { marginBottom: 8 }]}>Overhead and side towers swap. Auto lets the director trade them.</Text>
         <Text style={[styles.note, { marginBottom: 6 }]}>Cue</Text>
         <View style={styles.chips}>
           {CUES.map((c) => (
             <Pressable
               key={c.id}
-              onPress={() => set({ cue: c.id })}
+              onPress={() => (c.id === 'whiteOut' ? triggerWhiteOut() : set({ cue: c.id }))}
               style={[styles.paletteChip, s.cue === c.id && styles.chipActive]}
             >
               <Text style={styles.chipTitle}>{c.label}</Text>
@@ -147,7 +162,7 @@ export function SettingsPanel() {
         <View style={styles.toggleRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.toggleLabel}>Auto cues</Text>
-            <Text style={styles.note}>Change looks every phrase: wall, beams, laser sweeps, laser mesh, blackouts</Text>
+            <Text style={styles.note}>Change looks every phrase. White out is a 0.5s rotating flash, not a held cue.</Text>
           </View>
           <Switch
             value={s.autoCues}

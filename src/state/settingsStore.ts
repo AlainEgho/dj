@@ -66,10 +66,10 @@ class SettingsStore {
     }, 300);
   }
 
-  update(partial: Partial<StageSettings>) {
+  update(partial: Partial<StageSettings>, opts?: { preserveShowMode?: boolean }) {
     const next = { ...this.state.settings, ...partial };
     // any manual tweak moves us out of a named show mode
-    if (!('showMode' in partial)) next.showMode = 'custom';
+    if (!('showMode' in partial) && !opts?.preserveShowMode) next.showMode = 'custom';
     this.set({ settings: next });
     this.scheduleSave();
   }

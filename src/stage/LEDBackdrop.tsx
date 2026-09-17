@@ -228,9 +228,13 @@ export function LEDBackdrop() {
     u.uPace.value = s.pace;
     u.uBass.value = s.bass;
     u.uAmp.value = s.amp;
-    u.uBeat.value = s.beatEnv * 0.6;
-    u.uIntensity.value = 0.45 + s.settings.intensity * 0.75;
-    u.uWall.value = director.wall * (1 - director.blackout);
+    const beat = Number.isFinite(s.beatEnv) ? s.beatEnv : 0;
+    u.uBeat.value = beat;
+    // keep a readable floor whenever the director has the wall in at all;
+    // laser looks used to sit at 0.2 and the panel read as off
+    const wallOnStage = director.wall > 0.02 ? Math.max(director.wall, 0.62) : 0;
+    u.uIntensity.value = (0.5 + s.settings.intensity * 0.7) * (1 + beat * 0.2);
+    u.uWall.value = wallOnStage * (1 - director.blackout);
     u.uHue.value = s.hue;
     u.uSat.value = s.saturation;
   });
