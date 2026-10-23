@@ -1,50 +1,84 @@
 # Stage Visualizer
 
-Audio-reactive, Tomorrowland-style stage visualizer built with Expo + React Native.
-One codebase ships to iOS, Android and the web.
+A Tomorrowland-style lighting rig in the browser. Drop a laptop on the DJ booth, put the keyboard in your left hand, and call lasers, moving heads, LED wall looks and a full laser mesh the same way an operator works a lighting desk.
+
+One Expo / React Native codebase — **web, iOS and Android**.
+
+<p align="center">
+  <img src="docs/shots/full-rig.jpg" alt="Everything cue: laser mesh, moving heads and pixel LED wall" />
+</p>
+
+## What you are looking at
+
+| Element | What it does |
+| --- | --- |
+| **Lasers** | Floor and truss fans. One laser, then the bottom row, then sheets, then a slow-folding **mesh**. |
+| **Moving heads** | Overhead and side banks, separately. Cue them into the crowd, hold eye contact, then lift like a cloud. |
+| **LED wall** | Pixel galaxy, spectrum, heat map, shapes, text. Big drops punch a white burst, then Earth. |
+| **Keyboard** | Every cue is a key. `7` holds laser mesh, `` ` `` is everything, `Enter` is the drop, `?` is the cheat sheet. |
+| **Audio** | Mic, a track from disk, or (web) system audio via screen share. BPM, groove and onsets drive the director. |
+
+The director listens to the track: no beat → heads lock centre; kick returns → laser rise; rhythm change → back to beams. You can still grab the desk — queue a cue, or hold mesh / sheets until you call the next look.
 
 ## Run it
 
 ```bash
 npm install
-npm run web        # browser (Web Audio API + WebGL)
-npm run ios        # iOS simulator / device via Expo dev build
-npm run android    # Android emulator / device via Expo dev build
+npm run web        # Chrome. On a Mac, share the screen with “Share system audio”.
+npm run ios        # development build (not Expo Go)
+npm run android
 ```
 
-The native audio layer (`react-native-audio-api`) and `expo-gl` contain native
-code, so on iOS/Android you need a development build rather than Expo Go:
+Native audio (`react-native-audio-api`) and `expo-gl` need a dev build:
 
 ```bash
 npx expo prebuild
 npx expo run:ios      # or run:android
 ```
 
+## Keyboard as the lighting desk
+
+Press **?** in the browser for the full map. The ones you will actually use in a booth:
+
+| Key | Cue |
+| --- | --- |
+| `0` | Auto |
+| `3` | Beams to crowd |
+| `4` | Lasers |
+| `6` | Laser sheets |
+| `7` | Laser mesh (holds) |
+| `9` | Festival mix |
+| `` ` `` | Everything |
+| `Enter` | Drop (blackout, then white) |
+| `Space` | Hold blackout |
+| `q` | Record the show (video + sound) |
+| `f` | Fullscreen |
+| `z` `x` `c` `v` `n` | Laser groups (top / bottom / all) |
+| `y` | Swap beam banks |
+
+Mesh, sheets and mesh-blackout **hold** until you call something else — they do not get stolen by the next auto phrase.
+
+<p align="center">
+  <img src="docs/shots/laser-mesh.jpg" alt="Laser mesh held from the cue queue" />
+</p>
+
+<p align="center">
+  <img src="docs/shots/keyboard.jpg" alt="Keyboard lighting-desk cheat sheet" />
+</p>
+
+<p align="center">
+  <img src="docs/shots/beams-crowd.jpg" alt="Moving heads into the crowd over a pixel ring wall" />
+</p>
+
+## Stack
+
+Expo 57 · React Native / RN Web · Three.js / React Three Fiber · Web Audio (web) · `react-native-audio-api` (native) · GLSL LED wall.
+
 ## Deploy
 
-- **Web**: `npm run web:build` writes a static SPA to `dist/`. `vercel.json` and
-  `netlify.toml` are included, so pushing the repo to either host builds and serves it.
-- **Mobile**: `npm run build:android` / `npm run build:ios` (EAS Build, see `eas.json`).
+- **Web:** `npm run web:build` writes `dist/`. `vercel.json` and `netlify.toml` are in the repo.
+- **Mobile:** `npm run build:android` / `npm run build:ios` (EAS, see `eas.json`).
 
-## How it works
+## License
 
-| Layer | Files |
-| --- | --- |
-| Audio input (mic / system / file) | `src/audio/createEngine.ts` (web), `src/audio/createEngine.native.ts` |
-| Feature extraction (bands, onset, BPM) | `src/audio/analysis.ts` |
-| Unified hook | `src/audio/useAudioAnalyzer.ts` |
-| Audio -> visual mapping and colour engine | `src/stage/stageState.ts` |
-| Scene modules | `src/stage/LaserRig.tsx`, `BeamArray.tsx`, `StrobeWall.tsx`, `PyroBurst.tsx`, `LEDBackdrop.tsx` |
-| GLSL | `src/stage/shaders/index.ts` |
-| Settings, presets, palettes | `src/state/` |
-| Screens | `app/index.tsx`, `app/settings.tsx`, `app/projection.tsx` |
-
-Mapping: bass hits fire pyro and strobes, mids drive beam and laser sweep speed,
-treble drives laser flicker and colour shift, overall level drives brightness,
-and detected beats/BPM cycle the hue.
-
-## Notes
-
-- System-audio capture is web only (browser screen-share with "share audio").
-  Native platforms use the microphone or an imported track.
-- The FFT runs at 1024 points (512 bins) and is downsampled to 64 bins for the LED wall.
+[MIT](LICENSE) © Alain Egho

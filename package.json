@@ -1,6 +1,18 @@
 {
-  "name": "ot",
+  "name": "stage-visualizer",
   "version": "1.0.0",
+  "private": true,
+  "description": "Audio-reactive festival stage visualizer. Your laptop keyboard is the lighting desk — lasers, moving heads, LED wall, laser mesh.",
+  "license": "MIT",
+  "author": "Alain Egho",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlainEgho/dj.git"
+  },
+  "homepage": "https://github.com/AlainEgho/dj",
+  "bugs": {
+    "url": "https://github.com/AlainEgho/dj/issues"
+  },
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.15",
@@ -39,6 +51,5 @@
     "typecheck": "tsc --noEmit",
     "build:android": "eas build --platform android",
     "build:ios": "eas build --platform ios"
-  },
-  "private": true
+  }
 }
