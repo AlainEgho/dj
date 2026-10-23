@@ -5,7 +5,7 @@ A Tomorrowland-style lighting rig in the browser. Drop a laptop on the DJ booth,
 One Expo / React Native codebase — **web, iOS and Android**.
 
 <p align="center">
-  <img src="docs/shots/full-rig.jpg" alt="Everything cue: laser mesh, moving heads and pixel LED wall" />
+  <img src="docs/shots/github-hero.jpg" alt="Moving heads and opening laser fans" />
 </p>
 
 ## What you are looking at
